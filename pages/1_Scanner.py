@@ -11,11 +11,11 @@ from ui_style import (
 st.set_page_config(page_title="Market Scanner", page_icon="⚡", layout="wide")
 inject_css()
 
-# ── Auto-refresh every 5 min so dashboard stays current ─────────────────────
+# ── Auto-refresh every 5 min ─────────────────────────────────────────────────
 try:
     from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=5 * 60 * 1000, silent=True)
-except ImportError:
+    st_autorefresh(interval=5 * 60 * 1000, key="autorefresh")
+except Exception:
     pass
 
 st.markdown(f"""
