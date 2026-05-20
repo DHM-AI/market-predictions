@@ -131,3 +131,26 @@ def prune_sentiment_cache(days: int = 30) -> None:
 def db_available() -> bool:
     """Return True if Supabase credentials are configured."""
     return bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"))
+
+
+# ── Learnings ─────────────────────────────────────────────────────────────────
+
+def save_learning(record: dict) -> None:
+    _client().table("learnings").insert(record).execute()
+
+
+def load_learnings() -> list[dict]:
+    result = _client().table("learnings").select("*").order("week_of", desc=True).execute()
+    return result.data or []
+
+
+# ── Trades ────────────────────────────────────────────────────────────────────
+
+def save_trade(record: dict) -> None:
+    """Save an Alpaca trade execution record."""
+    _client().table("trades").upsert(record, on_conflict="order_id").execute()
+
+
+def load_trades() -> list[dict]:
+    result = _client().table("trades").select("*").order("timestamp", desc=True).execute()
+    return result.data or []

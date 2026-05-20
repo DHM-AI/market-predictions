@@ -1,16 +1,19 @@
 """
-Main agent pipeline. Run directly:
-    python agent.py              # scan + email
-    python agent.py --no-email  # scan without email
+Market Predictions Agent — full 5-agent pipeline.
 
-Steps:
-  1. Fetch OHLCV for full universe
-  2. Fetch news sentiment per ticker
-  3. Fetch earnings proximity
-  4. Score / predict using XGBoost (or rule-based fallback)
-  5. Explain top picks via Claude
-  6. Persist to Supabase (predictions + backfill actual moves)
-  7. Send email digest
+  1. Scan Agent    — fetch universe OHLCV + filter
+  2. Research Agent — parallel Reddit + RSS + news sentiment
+  3. Prediction Agent — XGBoost + sentiment → scored picks
+  4. Risk Agent    — Kelly Criterion position sizing
+  5. Learning Agent — backfill actuals, weekly post-mortem
+
+Optional: Alpaca execution for High-confidence picks (paper mode by default).
+
+Run:
+    python agent.py              # full scan + email + Alpaca (if configured)
+    python agent.py --no-email   # skip email
+    python agent.py --no-trade   # skip Alpaca execution
+    python agent.py --postmortem # run learning agent only
 """
 import sys
 import time
@@ -19,126 +22,178 @@ from datetime import datetime
 
 from data.universe import get_universe
 from data.fetcher import get_ohlcv_batch, get_earnings_days
+from data.research import research_universe
 from signals.sentiment import get_sentiment_with_velocity
+from signals.kelly import annotate_picks
 from model.predictor import predict_universe, model_available
 from analyst.claude_analyst import explain_picks
 from alerts.email import send_daily_digest
-from config import TOP_N_CLAUDE_ANALYSIS, MIN_SCORE_TO_ALERT
+from config import (TOP_N_CLAUDE_ANALYSIS, MIN_SCORE_TO_ALERT,
+                    AUTO_EXECUTE_MIN_SCORE, BANKROLL)
 import db
 
 
 def _backfill_actual_moves(ohlcv_map: dict) -> None:
-    """Fill in actual_move_5d for predictions older than 5 trading days."""
     if not db.db_available():
         return
     rows = db.load_predictions()
     if not rows:
         return
-
     log = pd.DataFrame(rows)
     today = pd.Timestamp.today().normalize()
-
+    changed = 0
     for _, row in log.iterrows():
         if pd.notna(row.get("actual_move_5d")):
             continue
         pred_date = pd.to_datetime(row["date"])
         if (today - pred_date).days < 7:
             continue
-
         ticker = row["ticker"]
         df = ohlcv_map.get(ticker)
         if df is None or df.empty:
             continue
-
         try:
             df.index = pd.to_datetime(df.index)
             future = df.loc[df.index > pred_date]["Close"].head(5)
             if len(future) < 3:
                 continue
-            entry = df.loc[df.index <= pred_date]["Close"].iloc[-1]
-            max_move = (future.max() - entry) / entry * 100
-            min_move = (future.min() - entry) / entry * 100
+            entry = float(df.loc[df.index <= pred_date]["Close"].iloc[-1])
+            max_move = (float(future.max()) - entry) / entry * 100
+            min_move = (float(future.min()) - entry) / entry * 100
             actual = max_move if abs(max_move) >= abs(min_move) else min_move
             db.update_actual_move(str(row["date"]), ticker, actual)
+            changed += 1
         except Exception:
             continue
+    if changed:
+        print(f"[agent] Backfilled {changed} actual moves.")
 
-    print("[agent] Backfill of actual moves complete.")
+
+def _execute_trades(picks_df: pd.DataFrame, explanations: dict) -> list[dict]:
+    """Auto-execute High-confidence picks via Alpaca (paper by default)."""
+    from execution.alpaca import is_configured, place_order, is_live_mode
+    if not is_configured():
+        print("[agent] Alpaca not configured — skipping execution.")
+        return []
+
+    mode = "LIVE 🔴" if is_live_mode() else "PAPER 📄"
+    print(f"\n[agent] Alpaca execution ({mode})")
+
+    results = []
+    auto_picks = picks_df[picks_df["score"] >= AUTO_EXECUTE_MIN_SCORE]
+    for _, row in auto_picks.iterrows():
+        ticker = row["ticker"]
+        direction = row.get("direction", "bullish")
+        dollar = row.get("dollar_amount", 0)
+        if dollar <= 0:
+            continue
+        reason = explanations.get(ticker, "")[:120]
+        result = place_order(ticker, dollar, direction, reason)
+        results.append(result)
+        print(f"  {ticker}: {result.get('status')} ${dollar:.0f} {direction}")
+    return results
 
 
-def run_scan(send_email: bool = True, verbose: bool = True) -> pd.DataFrame:
+def run_scan(send_email: bool = True,
+             execute_trades: bool = True,
+             verbose: bool = True) -> pd.DataFrame:
     start = time.time()
     today = datetime.today().strftime("%Y-%m-%d")
-    print(f"\n{'='*60}")
-    print(f"  Market Predictions Agent — {today}")
-    print(f"  Model: {'XGBoost' if model_available() else 'Rule-based fallback'}")
-    print(f"  DB:    {'Supabase' if db.db_available() else 'local only (no Supabase creds)'}")
-    print(f"{'='*60}\n")
 
-    # 1. Universe
+    print(f"\n{'='*62}")
+    print(f"  Market Predictions Agent  |  {today}")
+    print(f"  Model:   {'XGBoost ✓' if model_available() else 'Rule-based (no model)'}")
+    print(f"  DB:      {'Supabase ✓' if db.db_available() else 'local only'}")
+    print(f"  Bankroll: ${BANKROLL:,.0f}")
+    print(f"{'='*62}\n")
+
+    # ── 1. Scan ───────────────────────────────────────────────────
     tickers = get_universe()
-    print(f"[agent] Universe: {len(tickers)} tickers")
-
-    # 2. Fetch OHLCV (1 year of history)
-    print("[agent] Fetching OHLCV data...")
+    print(f"[1/5] SCAN — {len(tickers)} tickers")
     ohlcv_map = get_ohlcv_batch(tickers, period="1y", chunk_size=50)
-    print(f"[agent] Got data for {len(ohlcv_map)} tickers")
-
-    # 3. Backfill old predictions
+    print(f"      Got data for {len(ohlcv_map)} tickers")
     _backfill_actual_moves(ohlcv_map)
 
-    # 4. Sentiment (with Supabase cache)
-    print("[agent] Fetching sentiment scores...")
-    sentiment_map: dict = {}
-    for i, ticker in enumerate(tickers):
-        sentiment_map[ticker] = get_sentiment_with_velocity(ticker)
-        if (i + 1) % 50 == 0:
-            print(f"  {i+1}/{len(tickers)} sentiment scores done")
+    # ── 2. Research (parallel) ────────────────────────────────────
+    print(f"\n[2/5] RESEARCH — parallel Reddit + RSS + news")
+    blended_sentiment = research_universe(tickers)
 
-    # 5. Earnings proximity (sampled to avoid rate limits)
-    print("[agent] Fetching earnings dates (sampled)...")
+    # Persist sentiment velocity via existing cache
+    sentiment_map: dict = {}
+    for ticker in tickers:
+        cached = get_sentiment_with_velocity(ticker)
+        blended = blended_sentiment.get(ticker, {})
+        # Blend cached velocity with new multi-source score
+        combined_score = (cached.get("score", 0.0) * 0.4 +
+                          blended.get("score", 0.0) * 0.6)
+        sentiment_map[ticker] = {
+            **blended,
+            "score": round(combined_score, 4),
+            "velocity": cached.get("velocity", 0.0),
+            "spike": abs(cached.get("velocity", 0.0)) >= 0.3 or blended.get("score", 0) > 0.4,
+        }
+
+    # ── 3. Predict ────────────────────────────────────────────────
+    print(f"\n[3/5] PREDICT — XGBoost + blended sentiment")
     earnings_map: dict = {}
     for ticker in tickers[:100]:
         earnings_map[ticker] = get_earnings_days(ticker)
 
-    # 6. Score / predict
-    print("[agent] Scoring universe...")
     picks_df = predict_universe(tickers, ohlcv_map, sentiment_map, earnings_map)
 
     if picks_df is None or picks_df.empty:
         print("[agent] No setups above threshold today.")
         return pd.DataFrame()
 
-    print(f"\n[agent] {len(picks_df)} setups flagged (score ≥ {MIN_SCORE_TO_ALERT}):\n")
-    display_cols = ["ticker", "score", "direction", "duration", "confidence"]
-    available = [c for c in display_cols if c in picks_df.columns]
-    print(picks_df[available].to_string(index=False))
+    print(f"      {len(picks_df)} setups flagged (score ≥ {MIN_SCORE_TO_ALERT})")
 
-    # 7. Claude explanations for top picks
-    print(f"\n[agent] Generating Claude analysis for top {TOP_N_CLAUDE_ANALYSIS}...")
+    # ── 4. Risk — Kelly Criterion ─────────────────────────────────
+    print(f"\n[4/5] RISK — Kelly Criterion sizing (bankroll ${BANKROLL:,.0f})")
+    picks_df = annotate_picks(picks_df)
+    for _, row in picks_df.head(10).iterrows():
+        print(f"      {row['ticker']:6s}  score={row['score']:.0f}  "
+              f"${row.get('dollar_amount',0):,.0f}  ({row.get('risk_level','')})")
+
+    # Claude explanations
+    print(f"\n      Generating Claude analysis for top {TOP_N_CLAUDE_ANALYSIS}...")
     explanations = explain_picks(picks_df, top_n=TOP_N_CLAUDE_ANALYSIS)
-    for ticker, text in explanations.items():
-        print(f"\n--- {ticker} ---\n{text}")
 
-    # 8. Persist to Supabase
+    # ── 5. Learn — persist + optionally execute ───────────────────
+    print(f"\n[5/5] LEARN — persist predictions")
     if db.db_available():
         rows = picks_df.copy()
         rows["date"] = today
         rows["actual_move_5d"] = None
         db.append_predictions(rows.to_dict(orient="records"))
-        print(f"\n[agent] Saved {len(rows)} predictions to Supabase.")
-    else:
-        print("\n[agent] No Supabase credentials — predictions not persisted.")
+        print(f"      Saved {len(rows)} predictions to Supabase")
 
-    # 9. Email digest
+    # Alpaca execution
+    if execute_trades:
+        trade_results = _execute_trades(picks_df, explanations)
+    else:
+        print("      Alpaca execution skipped (--no-trade)")
+        trade_results = []
+
+    # Email digest
     if send_email:
         send_daily_digest(picks_df.head(TOP_N_CLAUDE_ANALYSIS), explanations)
 
     elapsed = time.time() - start
-    print(f"\n[agent] Done in {elapsed:.1f}s")
+    print(f"\n{'='*62}")
+    print(f"  Done in {elapsed:.1f}s | {len(picks_df)} setups | "
+          f"{len(trade_results)} trades placed")
+    print(f"{'='*62}\n")
     return picks_df
 
 
 if __name__ == "__main__":
-    no_email = "--no-email" in sys.argv
-    run_scan(send_email=not no_email)
+    args = sys.argv[1:]
+
+    if "--postmortem" in args:
+        from analyst.learning_agent import run_postmortem
+        run_postmortem()
+    else:
+        run_scan(
+            send_email="--no-email" not in args,
+            execute_trades="--no-trade" not in args,
+        )

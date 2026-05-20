@@ -12,3 +12,5 @@ xgboost>=2.0
 scikit-learn>=1.4
 supabase>=2.4
 lxml>=5.0
+feedparser>=6.0
+alpaca-py>=0.26

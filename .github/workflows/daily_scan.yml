@@ -1,15 +1,22 @@
-name: Daily Market Scan
+name: Market Predictions Agent
 
 on:
   schedule:
-    # 8:00 AM ET (EST = UTC-5 → 13:00 UTC, runs at 9AM during EDT Mar-Nov)
-    - cron: '0 13 * * 1-5'
-  workflow_dispatch:  # allow manual trigger from the Actions tab
+    - cron: '0 13 * * 1-5'   # Daily scan: 8 AM ET (EST) weekdays
+    - cron: '0 14 * * 0'     # Weekly postmortem: Sunday 2 PM UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: false
+        default: 'scan'
+        type: choice
+        options: [scan, postmortem, scan-no-trade]
 
 jobs:
-  scan:
+  agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -24,13 +31,28 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run market scan
-        run: python agent.py
+      - name: Run agent
+        run: |
+          # Determine mode based on trigger
+          if [ "${{ github.event.inputs.mode }}" = "postmortem" ]; then
+            python agent.py --postmortem
+          elif [ "${{ github.event.schedule }}" = "0 14 * * 0" ]; then
+            python agent.py --postmortem
+          elif [ "${{ github.event.inputs.mode }}" = "scan-no-trade" ]; then
+            python agent.py --no-trade
+          else
+            python agent.py
+          fi
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
-          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          ALPHA_VANTAGE_KEY:  ${{ secrets.ALPHA_VANTAGE_KEY }}
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASS:     ${{ secrets.GMAIL_APP_PASS }}
+          ALERT_EMAIL:        ${{ secrets.ALERT_EMAIL }}
+          ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_BASE_URL:    ${{ secrets.ALPACA_BASE_URL }}
+          ALPACA_LIVE_MODE:   ${{ secrets.ALPACA_LIVE_MODE }}
+          BANKROLL:           ${{ secrets.BANKROLL }}
