@@ -2,23 +2,23 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-from ui_style import (inject_css, bbg_header, bbg_page_title,
+from ui_style import (inject_css, section_header, page_title,
                       score_chip, direction_html, signal_tags, status_bar)
 
 st.set_page_config(page_title="MKTPRED | SCAN", page_icon="📡", layout="wide")
 inject_css()
 
-bbg_page_title("MARKET SCAN", "SCAN GO")
+page_title("AI Market Scanner", "S&P 500 + Futures · 5-Agent Pipeline · 5-10% Move Detection")
 st.markdown('<p style="color:#555;font-size:10px;letter-spacing:1px;margin-top:2px;">S&P 500 + FUTURES  ·  5-AGENT PIPELINE  ·  5-10% MOVE DETECTION</p>', unsafe_allow_html=True)
 
 # ── Run button ─────────────────────────────────────────────────────────────────
 c_btn, c_model, c_time = st.columns([1, 2, 1])
 with c_btn:
-    run_clicked = st.button("F8  ▶  RUN SCAN", type="primary", use_container_width=True)
+    run_clicked = st.button("▶  RUN SCAN", type="primary", use_container_width=True)
 with c_model:
     from model.predictor import model_available
     dot   = "●" if model_available() else "○"
-    color = "#F07D2A" if model_available() else "#555"
+    color = "#00ff88" if model_available() else "#555"
     label = "XGBOOST MODEL LOADED" if model_available() else "NO MODEL — RULE-BASED FALLBACK"
     st.markdown(f'<span style="color:{color};font-size:10px;letter-spacing:1px;">{dot} {label}</span>', unsafe_allow_html=True)
 with c_time:
@@ -37,7 +37,7 @@ left_col, right_col = st.columns([1, 2], gap="small")
 
 # ── LEFT: Ticker tape ──────────────────────────────────────────────────────────
 with left_col:
-    bbg_header("ACTIVE UNIVERSE", "SORTED BY MOVE")
+    section_header("ACTIVE UNIVERSE", "SORTED BY MOVE")
     tape_ph = st.empty()
 
     def render_tape(data: list):
@@ -73,21 +73,21 @@ with right_col:
     qual_ph     = st.empty()
 
     def render_agent(title, sub, count, running=False):
-        dot_color = "#F07D2A" if running else ("#00C805" if count != "—" else "#222")
+        dot_color = "#00ff88" if running else ("#00ff88" if count != "—" else "#222")
         pulse_css = "animation:pulse 0.8s infinite;" if running else ""
         agent_ph.markdown(f"""
-        <div style="border:1px solid #1a1a1a;border-top:2px solid #F07D2A;
+        <div style="border:1px solid #1a1a1a;border-top:2px solid #00ff88;
              background:#000;padding:12px 14px;display:flex;
              justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div>
             <div style="display:flex;align-items:center;gap:8px;">
               <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
                 background:{dot_color};{pulse_css}"></span>
-              <span style="color:#F07D2A;font-size:11px;font-weight:700;letter-spacing:1px;">{title}</span>
+              <span style="color:#00ff88;font-size:11px;font-weight:700;letter-spacing:1px;">{title}</span>
             </div>
             <div style="color:#444;font-size:10px;margin-top:3px;margin-left:16px;">{sub}</div>
           </div>
-          <div style="font-size:28px;font-weight:700;color:#F07D2A;letter-spacing:1px;">{count}</div>
+          <div style="font-size:28px;font-weight:700;color:#00ff88;letter-spacing:1px;">{count}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -113,7 +113,7 @@ with right_col:
               <div class="{dot_cls}"></div>
               <div style="flex:1;">
                 <div style="color:#ccc;font-size:10px;letter-spacing:0.5px;">
-                  <span style="color:#F07D2A;">{num}</span> · {label}
+                  <span style="color:#00ff88;">{num}</span> · {label}
                 </div>
                 <div style="color:#333;font-size:9px;">{sub}</div>
               </div>
@@ -128,14 +128,14 @@ with right_col:
     def render_qualified(n: int):
         if n > 0:
             qual_ph.markdown(f"""
-            <div style="border:1px solid #F07D2A;border-top:2px solid #F07D2A;
-                 background:#060300;padding:14px 16px;
+            <div style="border:1px solid #00ff88;border-top:2px solid #00ff88;
+                 background:#0a1f14;padding:14px 16px;
                  display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
               <div>
                 <div style="color:#555;font-size:9px;letter-spacing:2px;">QUALIFIED SETUPS</div>
-                <div style="color:#F07D2A;font-size:10px;margin-top:2px;letter-spacing:1px;">SCORE ≥ 50 · MOVE TARGET 5%+</div>
+                <div style="color:#00ff88;font-size:10px;margin-top:2px;letter-spacing:1px;">SCORE ≥ 50 · MOVE TARGET 5%+</div>
               </div>
-              <div style="font-size:36px;font-weight:700;color:#F07D2A;letter-spacing:2px;">
+              <div style="font-size:36px;font-weight:700;color:#00ff88;letter-spacing:2px;">
                 {n} <span style="font-size:14px;letter-spacing:3px;">FOUND</span>
               </div>
             </div>""", unsafe_allow_html=True)
@@ -260,7 +260,7 @@ if picks_df is None:
 # ══ RESULTS TABLE ═══════════════════════════════════════════════════════════════
 if picks_df is not None and not picks_df.empty:
     st.markdown("<hr/>", unsafe_allow_html=True)
-    bbg_header("QUALIFIED SETUPS", f"{len(picks_df)} RESULTS · SORTED BY SCORE")
+    section_header("QUALIFIED SETUPS", f"{len(picks_df)} RESULTS · SORTED BY SCORE")
 
     rows_html = ""
     for _, row in picks_df.iterrows():
@@ -277,9 +277,9 @@ if picks_df is not None and not picks_df.empty:
         if isinstance(sigs, str):
             sigs = [s.strip() for s in sigs.split(";") if s.strip()]
 
-        conf_color  = {"High": "#F07D2A", "Medium": "#F0B82A", "Low": "#333"}.get(conf, "#333")
+        conf_color  = {"High": "#00ff88", "Medium": "#F0B82A", "Low": "#333"}.get(conf, "#333")
         risk_color  = {"aggressive": "#FF3333", "moderate": "#F0B82A",
-                       "conservative": "#00C805", "skip": "#333"}.get(risk_lv, "#555")
+                       "conservative": "#00ff88", "skip": "#333"}.get(risk_lv, "#555")
         kelly_str   = f"${kelly:,.0f}" if kelly else "—"
         rsi_str     = f"{rsi:.1f}" if isinstance(rsi, float) else str(rsi)
         vol_str     = f"{vol:.1f}x" if isinstance(vol, float) else str(vol)
@@ -287,14 +287,14 @@ if picks_df is not None and not picks_df.empty:
 
         rows_html += f"""
         <tr>
-          <td style="color:#F07D2A;font-weight:700;font-size:13px;padding:9px 10px;">{ticker}</td>
+          <td style="color:#00ff88;font-weight:700;font-size:13px;padding:9px 10px;">{ticker}</td>
           <td style="padding:9px 10px;">{score_chip(score)}</td>
           <td style="padding:9px 10px;">{direction_html(direct)}</td>
           <td style="color:#555;font-size:10px;padding:9px 10px;">{dur}</td>
           <td style="color:{conf_color};font-size:10px;font-weight:700;padding:9px 10px;">{conf.upper()}</td>
           <td style="color:#888;padding:9px 10px;">{rsi_str}</td>
           <td style="color:#888;padding:9px 10px;">{vol_str}</td>
-          <td style="color:#F07D2A;font-weight:700;padding:9px 10px;">{kelly_str}</td>
+          <td style="color:#00ff88;font-weight:700;padding:9px 10px;">{kelly_str}</td>
           <td style="color:{risk_color};font-size:10px;font-weight:700;padding:9px 10px;">{risk_lv.upper()}</td>
           <td style="padding:9px 10px;">{sig_html}</td>
         </tr>"""
@@ -310,7 +310,7 @@ if picks_df is not None and not picks_df.empty:
 
     # ── Chart ──────────────────────────────────────────────────────────────────
     st.markdown("<hr/>", unsafe_allow_html=True)
-    bbg_header("PRICE CHART", "6M CANDLESTICK + BB BANDS")
+    section_header("PRICE CHART", "6M CANDLESTICK + BB BANDS")
 
     selected = st.selectbox("", picks_df["ticker"].tolist(), label_visibility="collapsed")
 
@@ -325,7 +325,7 @@ if picks_df is not None and not picks_df.empty:
             fig.add_trace(go.Candlestick(
                 x=df.index, open=df["Open"], high=df["High"],
                 low=df["Low"], close=df["Close"], name=selected,
-                increasing=dict(line=dict(color="#00C805"), fillcolor="#00280522"),
+                increasing=dict(line=dict(color="#00ff88"), fillcolor="#00280522"),
                 decreasing=dict(line=dict(color="#FF3333"), fillcolor="#28000522"),
             ))
             try:
@@ -336,10 +336,10 @@ if picks_df is not None and not picks_df.empty:
                 u = []; l = []
             if u and l:
                 fig.add_trace(go.Scatter(x=df.index, y=u[0],
-                    line=dict(color="#F07D2A", width=1, dash="dot"),
+                    line=dict(color="#00ff88", width=1, dash="dot"),
                     name="BB Upper", showlegend=False))
                 fig.add_trace(go.Scatter(x=df.index, y=l[0],
-                    line=dict(color="#F07D2A", width=1, dash="dot"),
+                    line=dict(color="#00ff88", width=1, dash="dot"),
                     fill="tonexty", fillcolor="rgba(240,125,42,0.04)",
                     name="BB Lower", showlegend=False))
 
@@ -354,7 +354,7 @@ if picks_df is not None and not picks_df.empty:
                            linecolor="#1a1a1a"),
                 margin=dict(l=0, r=0, t=20, b=0),
                 title=dict(text=f"{selected}  ·  6M",
-                           font=dict(color="#F07D2A", size=11, family="IBM Plex Mono"), x=0.01),
+                           font=dict(color="#00ff88", size=11, family="IBM Plex Mono"), x=0.01),
             )
             st.plotly_chart(fig, use_container_width=True)
 

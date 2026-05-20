@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from ui_style import inject_css, section_header, live_badge
+from ui_style import inject_css, section_header, live_badge, page_title
 from config import MOVE_TARGET_PCT
 
 st.set_page_config(page_title="Track Record", page_icon="📋", layout="wide")
