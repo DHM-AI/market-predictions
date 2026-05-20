@@ -4,14 +4,14 @@ import plotly.subplots as sp
 from ta.volatility import BollingerBands as TaBB, AverageTrueRange as TaATR
 from ta.momentum import RSIIndicator as TaRSI
 from signals.technicals import _bollinger_pandas, _atr_pandas, _rsi_pandas
-from ui_style import inject_css, section_header, score_pill, direction_badge, live_badge
+from ui_style import inject_css, section_header, score_pill, direction_badge, live_badge, CARD, BORDER, TEXT, MUTED, ACCENT, ACCENT_L, GREEN, RED, AMBER
 
 st.set_page_config(page_title="Ticker Deep Dive", page_icon="📊", layout="wide")
 inject_css()
 
 st.markdown(
-    f'<h2 style="color:#e8e8e8;font-weight:700;">Ticker Deep Dive{live_badge()}</h2>'
-    f'<p style="color:#444;font-size:13px;margin-top:-8px;">Full signal breakdown + AI analysis for any ticker</p>',
+    f'<h2 style="color:#fafafa;font-weight:700;font-size:22px;">Ticker Deep Dive {live_badge()}</h2>'
+    f'<p style="color:#71717a;font-size:13px;margin-top:4px;">Full signal breakdown + AI analysis for any symbol</p>',
     unsafe_allow_html=True
 )
 
@@ -23,7 +23,11 @@ with col_btn:
     analyze = st.button("Analyze", type="primary", use_container_width=True)
 
 if not ticker_input or not analyze:
-    st.markdown('<div style="color:#333;text-align:center;padding:80px 0;font-size:13px;">Enter a ticker above to analyze</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="text-align:center;padding:80px 0;font-size:13px;color:#52525b;">'
+        '📊 Enter a ticker above and click Analyze</div>',
+        unsafe_allow_html=True
+    )
     st.stop()
 
 ticker = ticker_input.upper().strip()
@@ -48,24 +52,29 @@ with st.spinner(f"Analyzing {ticker}..."):
 st.divider()
 c1, c2, c3, c4 = st.columns(4)
 score = result.get("score", 0)
-c1.markdown(f'<div style="background:#161616;border:1px solid #1e1e1e;border-radius:6px;padding:18px;text-align:center;">'
-            f'<div style="color:#444;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Score</div>'
-            f'<div style="font-family:JetBrains Mono,monospace;font-size:36px;font-weight:700;color:{"#00ff88" if score>=70 else "#f59e0b" if score>=50 else "#555"};">{score}</div>'
-            f'<div style="color:#444;font-size:11px;">/ 100</div></div>', unsafe_allow_html=True)
-c2.markdown(f'<div style="background:#161616;border:1px solid #1e1e1e;border-radius:6px;padding:18px;text-align:center;">'
-            f'<div style="color:#444;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Direction</div>'
-            f'<div style="font-size:20px;font-weight:700;margin-top:8px;">{direction_badge(result.get("direction","mixed"))}</div>'
-            f'</div>', unsafe_allow_html=True)
-c3.markdown(f'<div style="background:#161616;border:1px solid #1e1e1e;border-radius:6px;padding:18px;text-align:center;">'
-            f'<div style="color:#444;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Window</div>'
-            f'<div style="color:#e8e8e8;font-size:15px;font-weight:600;margin-top:8px;">{result.get("duration","—")}</div>'
-            f'</div>', unsafe_allow_html=True)
-conf = result.get("confidence","—")
-conf_color = {"High":"#00ff88","Medium":"#f59e0b","Low":"#555"}.get(conf,"#555")
-c4.markdown(f'<div style="background:#161616;border:1px solid #1e1e1e;border-radius:6px;padding:18px;text-align:center;">'
-            f'<div style="color:#444;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Confidence</div>'
-            f'<div style="color:{conf_color};font-size:20px;font-weight:700;margin-top:8px;">● {conf}</div>'
-            f'</div>', unsafe_allow_html=True)
+sc_color = GREEN if score >= 70 else AMBER if score >= 50 else MUTED
+c1.markdown(
+    f'<div style="background:{CARD};border:1px solid {BORDER};border-radius:10px;padding:18px;text-align:center;">'
+    f'<div style="color:{MUTED};font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:500;">Score</div>'
+    f'<div style="font-family:JetBrains Mono,monospace;font-size:38px;font-weight:700;color:{sc_color};margin:4px 0;">{score}</div>'
+    f'<div style="color:{MUTED};font-size:11px;">/ 100</div></div>', unsafe_allow_html=True)
+c2.markdown(
+    f'<div style="background:{CARD};border:1px solid {BORDER};border-radius:10px;padding:18px;text-align:center;">'
+    f'<div style="color:{MUTED};font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:500;">Direction</div>'
+    f'<div style="font-size:18px;font-weight:700;margin-top:12px;">{direction_badge(result.get("direction","mixed"))}</div>'
+    f'</div>', unsafe_allow_html=True)
+c3.markdown(
+    f'<div style="background:{CARD};border:1px solid {BORDER};border-radius:10px;padding:18px;text-align:center;">'
+    f'<div style="color:{MUTED};font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:500;">Window</div>'
+    f'<div style="color:{TEXT};font-size:16px;font-weight:600;margin-top:12px;">{result.get("duration","—")}</div>'
+    f'</div>', unsafe_allow_html=True)
+conf = result.get("confidence", "—")
+conf_color = {"High": GREEN, "Medium": AMBER, "Low": MUTED}.get(conf, MUTED)
+c4.markdown(
+    f'<div style="background:{CARD};border:1px solid {BORDER};border-radius:10px;padding:18px;text-align:center;">'
+    f'<div style="color:{MUTED};font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:500;">Confidence</div>'
+    f'<div style="color:{conf_color};font-size:18px;font-weight:700;margin-top:12px;">● {conf}</div>'
+    f'</div>', unsafe_allow_html=True)
 
 # Signal tags
 sigs = result.get("signals_triggered", [])
@@ -92,16 +101,17 @@ if earnings is not None:
 
 cols = st.columns(len(signals_data))
 for i, (name, triggered, detail) in enumerate(signals_data):
-    color  = "#00ff88" if triggered else "#333"
-    icon   = "●" if triggered else "○"
+    color  = GREEN if triggered else MUTED
+    border = GREEN if triggered else "#3f3f46"
+    icon   = "✓" if triggered else "○"
     pts    = result["breakdown"].get(name.lower().replace(" ","_"), 0)
     cols[i].markdown(
-        f'<div style="background:#161616;border:1px solid #1e1e1e;border-left:3px solid {color};'
-        f'border-radius:6px;padding:12px;text-align:center;">'
-        f'<div style="color:{color};font-size:18px;">{icon}</div>'
-        f'<div style="color:#e8e8e8;font-size:12px;font-weight:600;margin:4px 0;">{name}</div>'
-        f'<div style="color:#555;font-size:11px;">{detail}</div>'
-        f'<div style="color:{color};font-size:11px;margin-top:4px;">+{pts} pts</div>'
+        f'<div style="background:{CARD};border:1px solid {BORDER};border-left:3px solid {border};'
+        f'border-radius:10px;padding:14px;text-align:center;">'
+        f'<div style="color:{color};font-size:16px;font-weight:700;">{icon}</div>'
+        f'<div style="color:{TEXT};font-size:12px;font-weight:600;margin:6px 0 4px;">{name}</div>'
+        f'<div style="color:{MUTED};font-size:11px;">{detail}</div>'
+        f'<div style="color:{color};font-size:11px;margin-top:6px;font-weight:600;">+{pts} pts</div>'
         f'</div>', unsafe_allow_html=True
     )
 
@@ -126,34 +136,34 @@ fig = sp.make_subplots(rows=3, cols=1, shared_xaxes=True,
 
 fig.add_trace(go.Candlestick(x=df.index, open=df["Open"], high=df["High"],
     low=df["Low"], close=df["Close"], name=ticker,
-    increasing=dict(line=dict(color="#00ff88"), fillcolor="#00ff8833"),
-    decreasing=dict(line=dict(color="#ef4444"), fillcolor="#ef444433")), row=1, col=1)
+    increasing=dict(line=dict(color=GREEN), fillcolor="rgba(34,197,94,0.15)"),
+    decreasing=dict(line=dict(color=RED),   fillcolor="rgba(239,68,68,0.15)")), row=1, col=1)
 
 if bb_upper is not None and bb_lower is not None:
-    fig.add_trace(go.Scatter(x=df.index, y=bb_upper, line=dict(color="#1e1e1e", width=1),
-                              name="BB Upper", showlegend=False), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=bb_lower, line=dict(color="#1e1e1e", width=1),
-                              name="BB Lower", fill="tonexty",
-                              fillcolor="rgba(255,255,255,0.02)", showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=bb_upper,
+        line=dict(color="rgba(99,102,241,0.4)", width=1), showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=bb_lower,
+        line=dict(color="rgba(99,102,241,0.4)", width=1),
+        fill="tonexty", fillcolor="rgba(99,102,241,0.04)", showlegend=False), row=1, col=1)
 
 if rsi_s is not None:
-    fig.add_trace(go.Scatter(x=df.index, y=rsi_s, line=dict(color="#a78bfa", width=1.5),
-                              name="RSI"), row=2, col=1)
-    fig.add_hline(y=72, line_dash="dot", line_color="#ef4444", row=2, col=1)
-    fig.add_hline(y=28, line_dash="dot", line_color="#00ff88", row=2, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=rsi_s,
+        line=dict(color=ACCENT_L, width=1.5), name="RSI"), row=2, col=1)
+    fig.add_hline(y=72, line_dash="dot", line_color=RED, row=2, col=1)
+    fig.add_hline(y=28, line_dash="dot", line_color=GREEN, row=2, col=1)
 
 if atr_s is not None:
-    fig.add_trace(go.Scatter(x=df.index, y=atr_s, line=dict(color="#f59e0b", width=1.5),
-                              fill="tozeroy", fillcolor="rgba(245,158,11,0.05)",
-                              name="ATR"), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=atr_s,
+        line=dict(color=AMBER, width=1.5),
+        fill="tozeroy", fillcolor="rgba(245,158,11,0.06)", name="ATR"), row=3, col=1)
 
 fig.update_layout(height=600, template="plotly_dark",
-                  paper_bgcolor="#0d0d0d", plot_bgcolor="#0d0d0d",
+                  paper_bgcolor=CARD, plot_bgcolor=CARD,
                   xaxis_rangeslider_visible=False,
-                  xaxis3=dict(gridcolor="#1a1a1a"),
-                  yaxis=dict(gridcolor="#1a1a1a"),
-                  yaxis2=dict(gridcolor="#1a1a1a"),
-                  yaxis3=dict(gridcolor="#1a1a1a"),
+                  xaxis3=dict(gridcolor=BORDER),
+                  yaxis=dict(gridcolor=BORDER),
+                  yaxis2=dict(gridcolor=BORDER),
+                  yaxis3=dict(gridcolor=BORDER),
                   margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
 st.plotly_chart(fig, use_container_width=True)
 
@@ -161,9 +171,12 @@ st.plotly_chart(fig, use_container_width=True)
 st.divider()
 section_header("AI ANALYSIS")
 
-if st.button("Generate Claude Analysis", type="primary"):
+if st.button("✦  Generate Claude Analysis", type="primary"):
     from analyst.claude_analyst import stream_explanation
-    st.markdown('<div style="background:#161616;border:1px solid #1e1e1e;border-radius:6px;padding:16px;">', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="background:{CARD};border:1px solid {BORDER};border-radius:10px;padding:18px;">',
+        unsafe_allow_html=True
+    )
     with st.chat_message("assistant"):
         st.write_stream(stream_explanation(result))
     st.markdown('</div>', unsafe_allow_html=True)

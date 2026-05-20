@@ -1,194 +1,206 @@
 """
-AI Market Scanner UI — matches the dark green terminal from the reference screenshots.
-Black background · #00ff88 green · Clean Inter font · Minimal monospace for numbers only.
+AI Market Scanner — clean modern dark theme.
+Zinc backgrounds · Indigo accent · Inter + JetBrains Mono
 """
 import streamlit as st
-from datetime import datetime
+
+# ── Color tokens ──────────────────────────────────────────────────────────────
+BG       = "#09090b"   # zinc-950
+CARD     = "#18181b"   # zinc-900
+BORDER   = "#27272a"   # zinc-800
+TEXT     = "#fafafa"   # primary text
+MUTED    = "#71717a"   # zinc-500
+SUBTLE   = "#3f3f46"   # zinc-700
+ACCENT   = "#6366f1"   # indigo-500
+ACCENT_L = "#818cf8"   # indigo-400 (lighter)
+GREEN    = "#22c55e"   # green-500
+RED      = "#ef4444"   # red-500
+AMBER    = "#f59e0b"   # amber-500
 
 
 def inject_css():
-    st.markdown("""
+    st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-    /* ── Base ─────────────────────────────────────────────── */
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
-    .stApp { background: #0d0d0d !important; }
-    section[data-testid="stSidebar"] {
-        background: #0a0a0a !important;
-        border-right: 1px solid #1a1a1a !important;
-    }
+    html, body, [class*="css"] {{
+        font-family: 'Inter', sans-serif !important;
+        -webkit-font-smoothing: antialiased;
+    }}
+    .stApp {{ background: {BG} !important; }}
 
-    /* ── LIVE badge ───────────────────────────────────────── */
-    .live-badge {
+    /* Sidebar */
+    section[data-testid="stSidebar"] {{
+        background: {CARD} !important;
+        border-right: 1px solid {BORDER} !important;
+    }}
+    [data-testid="stSidebarNav"] a {{
+        color: {MUTED} !important;
+        font-size: 13px;
+        font-weight: 500;
+    }}
+    [data-testid="stSidebarNav"] a:hover {{ color: {TEXT} !important; }}
+
+    /* Live badge */
+    .live-badge {{
         display: inline-flex; align-items: center; gap: 5px;
-        background: rgba(0,255,136,0.1);
-        border: 1px solid #00ff88;
-        color: #00ff88;
-        font-size: 10px; font-weight: 700;
-        letter-spacing: 2px;
-        padding: 2px 10px;
-        border-radius: 3px;
-        margin-left: 10px;
-        vertical-align: middle;
-    }
-    .live-dot {
-        width: 6px; height: 6px; border-radius: 50%;
-        background: #00ff88;
-        animation: blink 1.2s infinite;
+        background: rgba(99,102,241,0.12);
+        border: 1px solid rgba(99,102,241,0.4);
+        color: {ACCENT_L};
+        font-size: 10px; font-weight: 600;
+        letter-spacing: 1.5px; text-transform: uppercase;
+        padding: 2px 10px; border-radius: 20px;
+        margin-left: 10px; vertical-align: middle;
+    }}
+    .live-dot {{
+        width: 5px; height: 5px; border-radius: 50%;
+        background: {ACCENT_L};
+        animation: pulse 1.8s infinite;
         display: inline-block;
-    }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    }}
+    @keyframes pulse {{
+        0%,100% {{ opacity:1; transform:scale(1); }}
+        50% {{ opacity:0.4; transform:scale(0.8); }}
+    }}
 
-    /* ── Agent / panel cards ──────────────────────────────── */
-    .agent-card {
-        background: #111;
-        border: 1px solid #1a1a1a;
-        border-left: 3px solid #00ff88;
-        border-radius: 6px;
-        padding: 14px 16px;
-        margin-bottom: 8px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .agent-card.idle    { border-left-color: #222; }
-    .agent-card.warn    { border-left-color: #f59e0b; }
-    .agent-card.done    { border-left-color: #00ff88; }
-    .agent-title  { color: #e8e8e8; font-size: 13px; font-weight: 600; }
-    .agent-sub    { color: #444; font-size: 11px; margin-top: 2px; }
-    .agent-count  {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 24px; font-weight: 700; color: #00ff88;
-    }
+    /* Cards */
+    .card {{
+        background: {CARD};
+        border: 1px solid {BORDER};
+        border-radius: 10px;
+        padding: 16px 18px;
+        margin-bottom: 10px;
+    }}
 
-    /* ── Pipeline steps ───────────────────────────────────── */
-    .pip-row {
-        display: flex; align-items: center;
-        padding: 9px 14px; border-bottom: 1px solid #111;
-        gap: 12px; font-size: 12px;
-    }
-    .pip-dot-on  { width:9px;height:9px;border-radius:50%;background:#00ff88;box-shadow:0 0 6px #00ff88;flex-shrink:0; }
-    .pip-dot-ok  { width:9px;height:9px;border-radius:50%;background:#00ff88;flex-shrink:0; }
-    .pip-dot-off { width:9px;height:9px;border-radius:50%;background:#1a1a1a;border:1px solid #2a2a2a;flex-shrink:0; }
-    .pip-label   { color:#e8e8e8;font-weight:500;flex:1; }
-    .pip-sub     { color:#333;font-size:10px; }
-    .pip-bar     { flex:1;height:3px;background:#1a1a1a;border-radius:2px;max-width:100px; }
-    .pip-bar-fill { height:3px;background:#00ff88;border-radius:2px; }
-    .pip-num-on  { font-family:'JetBrains Mono',monospace;color:#00ff88;font-weight:600;min-width:44px;text-align:right; }
-    .pip-num-ok  { font-family:'JetBrains Mono',monospace;color:#00ff88;font-weight:600;min-width:44px;text-align:right; }
-    .pip-num-off { font-family:'JetBrains Mono',monospace;color:#222;min-width:44px;text-align:right; }
-
-    /* ── Qualified box ────────────────────────────────────── */
-    .qual-box {
-        background: #0a1f14;
-        border: 1px solid #00ff88;
-        border-radius: 6px;
-        padding: 14px 18px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-top: 8px;
-    }
-    .qual-label { color: #00ff88; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
-    .qual-count { font-family:'JetBrains Mono',monospace; font-size:30px; font-weight:700; color:#00ff88; }
-
-    /* ── Ticker tape ──────────────────────────────────────── */
-    .tape-row {
-        display: flex; justify-content: space-between; align-items: center;
-        padding: 6px 12px; border-bottom: 1px solid #111;
-        font-size: 12px; cursor: pointer;
-    }
-    .tape-row:hover { background: #111; }
-    .tape-sym   { color: #00ff88; font-weight: 700; width: 60px; font-family: 'JetBrains Mono', monospace; }
-    .tape-price { color: #888; font-family: 'JetBrains Mono', monospace; flex: 1; text-align: right; padding-right: 12px; }
-    .tape-up    { color: #00ff88; font-family: 'JetBrains Mono', monospace; min-width: 54px; text-align: right; }
-    .tape-dn    { color: #ff4444; font-family: 'JetBrains Mono', monospace; min-width: 54px; text-align: right; }
-
-    /* ── Score chips ──────────────────────────────────────── */
-    .chip-hi  { background:#0a1f14;color:#00ff88;border:1px solid #00ff88;padding:2px 8px;font-size:11px;font-weight:700;border-radius:3px;font-family:'JetBrains Mono',monospace; }
-    .chip-med { background:#1a1500;color:#f59e0b;border:1px solid #f59e0b;padding:2px 8px;font-size:11px;font-weight:700;border-radius:3px;font-family:'JetBrains Mono',monospace; }
-    .chip-lo  { background:#111;color:#333;border:1px solid #222;padding:2px 8px;font-size:11px;font-weight:700;border-radius:3px;font-family:'JetBrains Mono',monospace; }
-
-    /* ── Direction ────────────────────────────────────────── */
-    .dir-bull { color:#00ff88;font-weight:700; }
-    .dir-bear { color:#ff4444;font-weight:700; }
-    .dir-mix  { color:#f59e0b;font-weight:600; }
-
-    /* ── Section headers ──────────────────────────────────── */
-    .sec-header {
-        font-size: 10px; font-weight: 600; letter-spacing: 2px;
-        text-transform: uppercase; color: #333;
-        padding: 6px 0 4px; border-bottom: 1px solid #1a1a1a;
-        margin-bottom: 12px;
-    }
-
-    /* ── Metrics ──────────────────────────────────────────── */
-    div[data-testid="metric-container"] {
-        background: #111 !important;
-        border: 1px solid #1a1a1a !important;
-        border-top: 2px solid #00ff88 !important;
-        border-radius: 6px !important;
-        padding: 12px 14px !important;
-    }
-    div[data-testid="metric-container"] label {
-        color: #333 !important; font-size: 10px !important;
-        text-transform: uppercase; letter-spacing: 1px;
-    }
-    div[data-testid="metric-container"] [data-testid="stMetricValue"] {
-        color: #e8e8e8 !important;
+    /* Metrics */
+    div[data-testid="metric-container"] {{
+        background: {CARD} !important;
+        border: 1px solid {BORDER} !important;
+        border-radius: 10px !important;
+        padding: 14px 16px !important;
+    }}
+    div[data-testid="metric-container"] label {{
+        color: {MUTED} !important;
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+    }}
+    div[data-testid="metric-container"] [data-testid="stMetricValue"] {{
+        color: {TEXT} !important;
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 22px !important; font-weight: 600 !important;
-    }
+        font-size: 20px !important;
+        font-weight: 600 !important;
+    }}
 
-    /* ── Buttons ──────────────────────────────────────────── */
-    .stButton > button {
-        background: #00ff88 !important; color: #000 !important;
-        font-weight: 700 !important; border: none !important;
-        border-radius: 5px !important; font-size: 12px !important;
-        letter-spacing: 0.5px;
-    }
-    .stButton > button:hover { background: #00cc6a !important; }
-    .stButton > button[kind="secondary"] {
-        background: #111 !important; color: #e8e8e8 !important;
-        border: 1px solid #2a2a2a !important;
-    }
-
-    /* ── Inputs ───────────────────────────────────────────── */
-    .stTextInput > div > div > input,
-    .stSelectbox > div > div {
-        background: #111 !important; border: 1px solid #1a1a1a !important;
-        border-radius: 5px !important; color: #e8e8e8 !important;
+    /* Buttons */
+    .stButton > button {{
+        background: {ACCENT} !important;
+        color: #fff !important;
+        font-weight: 600 !important;
+        border: none !important;
+        border-radius: 8px !important;
         font-size: 13px !important;
-    }
-    .stTextInput > div > div > input:focus { border-color: #00ff88 !important; }
+        letter-spacing: 0.3px;
+        transition: background 0.15s;
+    }}
+    .stButton > button:hover {{ background: #4f46e5 !important; }}
+    .stButton > button[kind="secondary"] {{
+        background: {CARD} !important;
+        color: {TEXT} !important;
+        border: 1px solid {BORDER} !important;
+    }}
+    .stButton > button[kind="secondary"]:hover {{
+        background: {BORDER} !important;
+    }}
 
-    /* ── Tables ───────────────────────────────────────────── */
-    .stDataFrame { border: 1px solid #1a1a1a !important; border-radius: 6px; }
-    .stDataFrame thead tr th {
-        background: #111 !important; color: #333 !important;
-        font-size: 10px !important; text-transform: uppercase; letter-spacing: 1px;
-        border-bottom: 1px solid #1a1a1a !important;
-    }
-    .stDataFrame tbody tr td { color: #e8e8e8 !important; border-bottom: 1px solid #0d0d0d !important; }
-    .stDataFrame tbody tr:hover td { background: #111 !important; }
+    /* Inputs */
+    .stTextInput > div > div > input,
+    .stSelectbox > div > div {{
+        background: {CARD} !important;
+        border: 1px solid {BORDER} !important;
+        border-radius: 8px !important;
+        color: {TEXT} !important;
+        font-size: 14px !important;
+    }}
+    .stTextInput > div > div > input:focus {{ border-color: {ACCENT} !important; }}
+    .stTextInput > div > div > input::placeholder {{ color: {MUTED} !important; }}
 
-    /* ── Dividers ─────────────────────────────────────────── */
-    hr { border-color: #1a1a1a !important; }
+    /* Dividers */
+    hr {{ border-color: {BORDER} !important; margin: 16px 0 !important; }}
 
-    /* ── Expander ─────────────────────────────────────────── */
-    .streamlit-expanderHeader {
-        background: #111 !important; border: 1px solid #1a1a1a !important;
-        border-radius: 5px !important; color: #e8e8e8 !important;
-        font-size: 12px !important;
-    }
+    /* Expanders */
+    .streamlit-expanderHeader {{
+        background: {CARD} !important;
+        border: 1px solid {BORDER} !important;
+        border-radius: 8px !important;
+        color: {TEXT} !important;
+        font-size: 13px !important;
+    }}
 
-    /* ── Nav sidebar ──────────────────────────────────────── */
-    [data-testid="stSidebarNav"] a { color: #333 !important; font-size: 12px; }
-    [data-testid="stSidebarNav"] a:hover { color: #00ff88 !important; }
+    /* Section headers */
+    .sec-header {{
+        font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+        text-transform: uppercase; color: {MUTED};
+        padding-bottom: 8px;
+        border-bottom: 1px solid {BORDER};
+        margin-bottom: 14px;
+    }}
 
-    code { color: #00ff88 !important; }
-    .block-container { padding-top: 24px !important; }
+    /* Score badges */
+    .score-high {{
+        display: inline-block;
+        background: rgba(34,197,94,0.1);
+        border: 1px solid rgba(34,197,94,0.3);
+        color: {GREEN};
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px; font-weight: 700;
+        padding: 2px 8px; border-radius: 6px;
+    }}
+    .score-med {{
+        display: inline-block;
+        background: rgba(245,158,11,0.1);
+        border: 1px solid rgba(245,158,11,0.3);
+        color: {AMBER};
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px; font-weight: 700;
+        padding: 2px 8px; border-radius: 6px;
+    }}
+    .score-lo {{
+        display: inline-block;
+        background: rgba(113,113,122,0.1);
+        border: 1px solid {SUBTLE};
+        color: {MUTED};
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px; font-weight: 700;
+        padding: 2px 8px; border-radius: 6px;
+    }}
+
+    /* Direction pills */
+    .dir-bull {{
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(34,197,94,0.08);
+        border: 1px solid rgba(34,197,94,0.25);
+        color: {GREEN}; font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+    }}
+    .dir-bear {{
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(239,68,68,0.08);
+        border: 1px solid rgba(239,68,68,0.25);
+        color: {RED}; font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+    }}
+    .dir-mix {{
+        display: inline-flex; align-items: center; gap: 4px;
+        background: rgba(245,158,11,0.08);
+        border: 1px solid rgba(245,158,11,0.25);
+        color: {AMBER}; font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+    }}
+
+    code {{ color: {ACCENT_L} !important; }}
+    .block-container {{ padding-top: 24px !important; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -202,53 +214,71 @@ def section_header(text: str):
 
 
 def page_title(title: str, subtitle: str = ""):
-    sub = f'<p style="color:#444;font-size:12px;margin-top:2px;">{subtitle}</p>' if subtitle else ""
+    sub = f'<p style="color:{MUTED};font-size:13px;margin-top:4px;font-weight:400;">{subtitle}</p>' if subtitle else ""
     st.markdown(
-        f'<h2 style="color:#e8e8e8;font-weight:700;margin-bottom:0;">'
-        f'{title}{live_badge()}</h2>{sub}',
+        f'<h2 style="color:{TEXT};font-weight:700;margin-bottom:0;font-size:24px;">'
+        f'{title} {live_badge()}</h2>{sub}',
         unsafe_allow_html=True
     )
 
 
-def agent_card(name: str, subtitle: str, value: str, status: str = "done") -> str:
-    dot_color = {"done": "#00ff88", "running": "#00ff88", "idle": "#222", "warn": "#f59e0b"}.get(status, "#00ff88")
-    pulse = "animation:blink 0.8s infinite;" if status == "running" else ""
-    return f"""
-    <div class="agent-card {status}">
-      <div>
-        <div class="agent-title">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-            background:{dot_color};margin-right:8px;{pulse}"></span>{name}
-        </div>
-        <div class="agent-sub">{subtitle}</div>
-      </div>
-      <div class="agent-count">{value}</div>
-    </div>"""
-
-
 def score_chip(score: float) -> str:
-    if score >= 70: return f'<span class="chip-hi">{score:.0f}</span>'
-    if score >= 50: return f'<span class="chip-med">{score:.0f}</span>'
-    return f'<span class="chip-lo">{score:.0f}</span>'
+    if score >= 70:
+        return f'<span class="score-high">{score:.0f}</span>'
+    if score >= 50:
+        return f'<span class="score-med">{score:.0f}</span>'
+    return f'<span class="score-lo">{score:.0f}</span>'
+
+# Alias used in Ticker Dive
+score_pill = score_chip
 
 
 def direction_html(d: str) -> str:
-    if d == "bullish": return '<span class="dir-bull">▲ BULL</span>'
-    if d == "bearish": return '<span class="dir-bear">▼ BEAR</span>'
-    return '<span class="dir-mix">◆ WTCH</span>'
+    if d == "bullish":
+        return '<span class="dir-bull">↑ Bull</span>'
+    if d == "bearish":
+        return '<span class="dir-bear">↓ Bear</span>'
+    return '<span class="dir-mix">◆ Watch</span>'
+
+# Alias used in Ticker Dive
+direction_badge = direction_html
 
 
 def signal_tags(sigs: list) -> str:
     return "".join(
-        f'<span style="display:inline-block;background:#0a1f14;border:1px solid #00ff88;'
-        f'color:#00ff88;font-size:10px;padding:2px 8px;border-radius:3px;margin:2px;">{s}</span>'
+        f'<span style="display:inline-block;background:rgba(99,102,241,0.08);'
+        f'border:1px solid rgba(99,102,241,0.3);color:{ACCENT_L};'
+        f'font-size:11px;padding:2px 9px;border-radius:20px;margin:2px;">{s}</span>'
         for s in sigs
     )
 
 
+def agent_card(name: str, subtitle: str, value: str, status: str = "done") -> str:
+    color = {
+        "done":    GREEN,
+        "running": ACCENT_L,
+        "idle":    SUBTLE,
+        "warn":    AMBER,
+    }.get(status, GREEN)
+    pulse = "animation:pulse 0.9s infinite;" if status == "running" else ""
+    return f"""
+    <div style="background:{CARD};border:1px solid {BORDER};border-radius:10px;
+                padding:14px 18px;margin-bottom:8px;
+                display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="color:{TEXT};font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                       background:{color};{pulse}"></span>{name}
+        </div>
+        <div style="color:{MUTED};font-size:11px;margin-top:3px;margin-left:16px;">{subtitle}</div>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:{color};">{value}</div>
+    </div>"""
+
+
 def status_bar(text: str):
     st.markdown(
-        f'<div style="border-top:1px solid #1a1a1a;padding:5px 0;'
-        f'font-size:10px;color:#333;letter-spacing:1px;margin-top:16px;">{text}</div>',
+        f'<div style="border-top:1px solid {BORDER};padding:6px 0;'
+        f'font-size:10px;color:{MUTED};letter-spacing:1px;margin-top:16px;">{text}</div>',
         unsafe_allow_html=True
     )
