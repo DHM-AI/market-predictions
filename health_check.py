@@ -74,7 +74,7 @@ REQUIRED_VARS = {
     "ALPACA_API_KEY":     "Trading execution — CRITICAL",
     "ALPACA_SECRET_KEY":  "Trading execution — CRITICAL",
     "ALPHA_VANTAGE_KEY":  "News sentiment (falls back gracefully)",
-    "ALERT_EMAIL":        "Email reports",
+    "SLACK_WEBHOOK_URL":  "Slack alerts (non-fatal if missing)",
 }
 missing_critical = []
 missing_optional = []
@@ -352,90 +352,13 @@ print(f"{'═'*60}\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EMAIL REPORT
+# SLACK REPORT
 # ══════════════════════════════════════════════════════════════════════════════
-def _build_email_html(report: HealthReport) -> str:
-    overall = report.overall()
-    header_color = {"PASS": "#00ff88", "WARN": "#ffaa00", "FAIL": "#ff2d78"}[overall]
-    header_text  = {
-        "PASS": "✓ All Systems Operational",
-        "WARN": "⚠ Operational with Warnings",
-        "FAIL": "✗ System Failure Detected",
-    }[overall]
-
-    rows = ""
-    for name, status, detail in report.checks:
-        color = {"PASS": "#00ff88", "WARN": "#ffaa00", "FAIL": "#ff2d78"}[status]
-        icon  = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[status]
-        rows += (
-            f'<tr style="border-bottom:1px solid #1a1a1a;">'
-            f'<td style="padding:8px 12px;color:{color};font-weight:700;">{icon} {status}</td>'
-            f'<td style="padding:8px 12px;color:#e8e8e8;font-weight:600;">{name}</td>'
-            f'<td style="padding:8px 12px;color:#888;font-size:12px;">{detail}</td>'
-            f'</tr>'
-        )
-
-    return f"""
-<!DOCTYPE html>
-<html>
-<body style="background:#0d0d0d;color:#e8e8e8;font-family:Inter,sans-serif;padding:24px;">
-  <div style="max-width:700px;margin:0 auto;">
-    <div style="background:#111;border:1px solid #1e1e1e;border-top:3px solid {header_color};
-                border-radius:8px;padding:20px 24px;margin-bottom:16px;">
-      <div style="font-size:20px;font-weight:700;color:{header_color};">{header_text}</div>
-      <div style="font-size:13px;color:#555;margin-top:4px;">
-        {datetime.now().strftime('%A %B %d, %Y · %H:%M ET')} · {report.summary()}
-      </div>
-    </div>
-    <div style="background:#111;border:1px solid #1e1e1e;border-radius:8px;overflow:hidden;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        <thead>
-          <tr style="background:#161616;">
-            <th style="padding:10px 12px;text-align:left;color:#444;font-size:10px;
-                       letter-spacing:1px;text-transform:uppercase;width:80px;">Status</th>
-            <th style="padding:10px 12px;text-align:left;color:#444;font-size:10px;
-                       letter-spacing:1px;text-transform:uppercase;width:220px;">Check</th>
-            <th style="padding:10px 12px;text-align:left;color:#444;font-size:10px;
-                       letter-spacing:1px;text-transform:uppercase;">Detail</th>
-          </tr>
-        </thead>
-        <tbody>{rows}</tbody>
-      </table>
-    </div>
-    <div style="margin-top:12px;font-size:11px;color:#333;text-align:center;">
-      Market Intelligence Dashboard · Health Check Agent · Auto-generated
-    </div>
-  </div>
-</body>
-</html>"""
-
-
 try:
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from config import ALERT_EMAIL, GMAIL_USER, GMAIL_APP_PASS
-
-    if not GMAIL_USER or not GMAIL_APP_PASS:
-        print("📧 Email skipped — GMAIL_USER / GMAIL_APP_PASS not configured")
-    else:
-        subject_icon = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[overall]
-        subject = (f"{subject_icon} Health Check {overall} — "
-                   f"{report.n_pass} passed · {report.n_warn} warnings · "
-                   f"{report.n_fail} failures — "
-                   f"{datetime.now().strftime('%b %d %Y')}")
-        html = _build_email_html(report)
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = GMAIL_USER
-        msg["To"]      = ALERT_EMAIL
-        msg.attach(MIMEText(html, "html"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
-            srv.login(GMAIL_USER, GMAIL_APP_PASS)
-            srv.sendmail(GMAIL_USER, ALERT_EMAIL, msg.as_string())
-        print(f"📧 Report emailed to {ALERT_EMAIL}")
+    from alerts.slack import send_health_report
+    send_health_report(report)
 except Exception as e:
-    print(f"📧 Email skipped: {e}")
+    print(f"[slack] Report skipped: {e}")
 
 
 # Exit with non-zero code if any failures

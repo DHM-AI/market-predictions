@@ -6,9 +6,10 @@ load_dotenv()
 # ── API Keys ──────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
 ALPHA_VANTAGE_KEY  = os.getenv("ALPHA_VANTAGE_KEY", "")
-GMAIL_USER         = os.getenv("GMAIL_USER", "")
-GMAIL_APP_PASS     = os.getenv("GMAIL_APP_PASS", "")
-ALERT_EMAIL        = os.getenv("ALERT_EMAIL", "renato@deltahubmedia.com")
+SLACK_WEBHOOK_URL  = os.getenv("SLACK_WEBHOOK_URL", "")
+GMAIL_USER         = os.getenv("GMAIL_USER", "")        # legacy — kept for optional fallback
+GMAIL_APP_PASS     = os.getenv("GMAIL_APP_PASS", "")    # legacy
+ALERT_EMAIL        = os.getenv("ALERT_EMAIL", "renato@deltahubmedia.com")  # legacy
 
 # ── Supabase ──────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")

@@ -27,7 +27,7 @@ from signals.sentiment import get_sentiment_with_velocity
 from signals.kelly import annotate_picks
 from model.predictor import predict_universe, model_available
 from analyst.claude_analyst import explain_picks
-from alerts.email import send_daily_digest
+from alerts.slack import send_daily_digest, send_trade_alert
 from config import (TOP_N_CLAUDE_ANALYSIS, MIN_SCORE_TO_ALERT,
                     AUTO_EXECUTE_MIN_SCORE, BANKROLL)
 import db
@@ -91,6 +91,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict) -> list[dict]:
         result = place_order(ticker, dollar, direction, reason)
         results.append(result)
         print(f"  {ticker}: {result.get('status')} ${dollar:.0f} {direction}")
+        send_trade_alert(result)   # instant Slack ping when bracket order placed
     return results
 
 
