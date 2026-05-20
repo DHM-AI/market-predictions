@@ -2,8 +2,10 @@ name: Market Predictions Agent
 
 on:
   schedule:
-    - cron: '0 13 * * 1-5'   # Daily scan: 8 AM ET (EST) weekdays
-    - cron: '0 14 * * 0'     # Weekly postmortem: Sunday 2 PM UTC
+    - cron: '0 13 * * 1-5'    # 8:00 AM ET — pre-market scan
+    - cron: '30 16 * * 1-5'   # 11:30 AM ET — midday re-scan
+    - cron: '0 20 * * 1-5'    # 3:00 PM ET — near-close scan
+    - cron: '0 14 * * 0'      # Sunday 9 AM ET — weekly post-mortem
   workflow_dispatch:
     inputs:
       mode:
@@ -33,7 +35,6 @@ jobs:
 
       - name: Run agent
         run: |
-          # Determine mode based on trigger
           if [ "${{ github.event.inputs.mode }}" = "postmortem" ]; then
             python agent.py --postmortem
           elif [ "${{ github.event.schedule }}" = "0 14 * * 0" ]; then

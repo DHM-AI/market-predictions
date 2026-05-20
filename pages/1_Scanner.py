@@ -69,25 +69,20 @@ hr {{ border-color:rgba(0,180,255,0.08) !important; margin:16px 0 !important; }}
 .metric-sub {{ font-size:10px; color:{TEXT2}; margin-top:3px; }}
 
 /* ── Tooltip system ── */
-.tt {{ position:relative; display:inline-block; cursor:help; }}
+.tt {{ position:relative; display:block; cursor:help; }}
 .tt .tip {{
     visibility:hidden; opacity:0;
-    position:absolute; z-index:9999; bottom:calc(100% + 8px); left:50%;
-    transform:translateX(-50%);
-    background:#0a1628; border:1px solid rgba(0,180,255,0.3);
-    border-radius:8px; padding:12px 14px;
-    font-size:11px; color:{TEXT}; line-height:1.6;
-    min-width:220px; max-width:300px;
-    box-shadow:0 8px 32px rgba(0,0,0,0.6);
+    position:fixed; z-index:99999;
+    background:#071828; border:1px solid rgba(0,180,255,0.4);
+    border-radius:10px; padding:14px 16px;
+    font-size:11px; color:{TEXT}; line-height:1.7;
+    width:260px;
+    box-shadow:0 16px 48px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,180,255,0.1);
     transition:opacity 0.15s; pointer-events:none;
     text-align:left; white-space:normal;
 }}
-.tt .tip::after {{
-    content:''; position:absolute; top:100%; left:50%;
-    transform:translateX(-50%);
-    border:6px solid transparent; border-top-color:rgba(0,180,255,0.3);
-}}
 .tt:hover .tip {{ visibility:visible; opacity:1; }}
+/* JS positions the tip on hover to stay on-screen */
 
 /* ── Section header ── */
 .sec {{
@@ -166,6 +161,18 @@ hr {{ border-color:rgba(0,180,255,0.08) !important; margin:16px 0 !important; }}
 @keyframes blink {{ 0%,100%{{opacity:1}} 50%{{opacity:0.25}} }}
 
 div[data-testid="stSelectbox"] div {{ background:{SURF} !important; border-color:rgba(0,180,255,0.2) !important; color:{TEXT} !important; }}
+
+/* ── Trade history table ── */
+.hist-row {{
+    display:grid; grid-template-columns:90px 80px 60px 90px 100px 1fr;
+    align-items:center; gap:10px;
+    padding:10px 16px; border-bottom:1px solid rgba(0,180,255,0.05);
+    transition:background 0.1s;
+}}
+.hist-row:hover {{ background:rgba(0,180,255,0.03); }}
+.hist-row:last-child {{ border-bottom:none; }}
+.hist-hdr {{ display:grid; grid-template-columns:90px 80px 60px 90px 100px 1fr; gap:10px; padding:8px 16px; background:rgba(0,180,255,0.04); border-radius:6px 6px 0 0; }}
+.hist-lbl {{ font-size:9px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:{TEXT3}; }}
 .stButton > button {{
     background:rgba(0,180,255,0.08) !important; color:{GLOW} !important;
     border:1px solid rgba(0,180,255,0.25) !important; border-radius:6px !important;
@@ -541,3 +548,72 @@ if picks_df is not None and not picks_df.empty:
                 st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.markdown(f'<div style="color:{TEXT2};padding:20px;text-align:center;font-size:12px;">Chart unavailable: {e}</div>', unsafe_allow_html=True)
+
+# ── TRADE HISTORY ──────────────────────────────────────────────────────────────
+st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+st.markdown(
+    f'<div class="sec">Full Trade History <span class="sec-n">{len(trades)} records</span></div>',
+    unsafe_allow_html=True)
+
+if trades:
+    hdr = (f'<div class="hist-hdr">'
+           f'<span class="hist-lbl">Time</span>'
+           f'<span class="hist-lbl">Ticker</span>'
+           f'<span class="hist-lbl">Side</span>'
+           f'<span class="hist-lbl">Amount</span>'
+           f'<span class="hist-lbl">Mode</span>'
+           f'<span class="hist-lbl">Reason</span>'
+           f'</div>')
+    rows_html = ""
+    for t in trades:
+        side  = t.get("side","")
+        c     = GREEN if side=="buy" else RED
+        ts    = str(t.get("timestamp",""))[:16].replace("T"," ")
+        amt   = float(t.get("dollar_amount",0))
+        mode  = t.get("mode","PAPER")
+        mc    = RED if mode=="LIVE" else AMBER
+        reason= str(t.get("reason","—"))[:80]
+        rows_html += (
+            f'<div class="hist-row">'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT2};">{ts}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:{GLOW};">{t.get("ticker","")}</span>'
+            f'<span style="background:{"rgba(0,255,136,0.1)" if side=="buy" else "rgba(255,45,120,0.1)"};'
+            f'border:1px solid {"rgba(0,255,136,0.3)" if side=="buy" else "rgba(255,45,120,0.3)"};'
+            f'color:{c};font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 7px;border-radius:3px;">'
+            f'{side.upper()}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:{c};">${amt:,.0f}</span>'
+            f'<span style="font-size:10px;font-weight:700;color:{mc};">{mode}</span>'
+            f'<span style="font-size:11px;color:{TEXT2};">{reason}</span>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;overflow:hidden;">'
+        f'{hdr}{rows_html}</div>',
+        unsafe_allow_html=True)
+else:
+    st.markdown(
+        f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;'
+        f'padding:24px;text-align:center;color:{TEXT3};font-size:12px;">'
+        f'No trade history yet. Auto-executed trades will appear here.</div>',
+        unsafe_allow_html=True)
+
+# ── Smart tooltip positioning ──────────────────────────────────────────────────
+st.markdown("""
+<script>
+document.querySelectorAll('.tt').forEach(el => {
+    el.addEventListener('mouseenter', function(e) {
+        const tip = this.querySelector('.tip');
+        if (!tip) return;
+        const r = this.getBoundingClientRect();
+        const tw = 260, th = 200;
+        let left = r.left + r.width / 2 - tw / 2;
+        let top  = r.bottom + 8;
+        if (left < 8) left = 8;
+        if (left + tw > window.innerWidth - 8) left = window.innerWidth - tw - 8;
+        if (top + th > window.innerHeight - 8) top = r.top - th - 8;
+        tip.style.left = left + 'px';
+        tip.style.top  = top  + 'px';
+    });
+});
+</script>
+""", unsafe_allow_html=True)
