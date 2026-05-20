@@ -4,329 +4,152 @@ import plotly.graph_objects as go
 from datetime import datetime
 import math
 
-st.set_page_config(page_title="Market Scanner", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Market Scanner", page_icon="⚡", layout="wide",
+                   initial_sidebar_state="collapsed")
 
-# ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 BG    = "#03060d"
 SURF  = "#07111f"
 SURF2 = "#0c1d30"
-GLOW  = "#00d4ff"       # cyan primary
-GREEN = "#00ff88"       # bullish
-RED   = "#ff2d78"       # bearish
-AMBER = "#ffaa00"       # watch
-TEXT  = "#c8e8ff"       # blue-white
-TEXT2 = "#4a7a9b"       # muted
-TEXT3 = "#1e3a50"       # very muted
+GLOW  = "#00d4ff"
+GREEN = "#00ff88"
+RED   = "#ff2d78"
+AMBER = "#ffaa00"
+TEXT  = "#c8e8ff"
+TEXT2 = "#4a7a9b"
+TEXT3 = "#1e3a50"
 
-# ─── GLOBAL CSS ───────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-
 *, body, html, [class*="css"] {{
     font-family: 'Inter', sans-serif !important;
     -webkit-font-smoothing: antialiased;
 }}
-
-/* ── Deep space background with grid ── */
 .stApp {{
     background: {BG} !important;
     background-image:
-        linear-gradient(rgba(0,180,255,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,180,255,0.03) 1px, transparent 1px),
-        radial-gradient(ellipse at 50% 0%, rgba(0,100,200,0.12) 0%, transparent 60%) !important;
-    background-size: 44px 44px, 44px 44px, 100% 100% !important;
+        linear-gradient(rgba(0,180,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,180,255,0.025) 1px, transparent 1px),
+        radial-gradient(ellipse at 50% 0%, rgba(0,80,180,0.10) 0%, transparent 60%) !important;
+    background-size: 48px 48px, 48px 48px, 100% 100% !important;
+}}
+/* Hide everything Streamlit */
+header[data-testid="stHeader"] {{ display:none !important; }}
+.stAppHeader {{ display:none !important; }}
+#stDecoration {{ display:none !important; }}
+section[data-testid="stSidebar"] {{ display:none !important; }}
+[data-testid="collapsedControl"] {{ display:none !important; }}
+.block-container {{ padding: 20px 28px !important; max-width: 100% !important; }}
+div[data-testid="stSelectbox"] div {{ background:{SURF} !important; border-color:rgba(0,180,255,0.15) !important; color:{TEXT} !important; }}
+hr {{ border-color: rgba(0,180,255,0.08) !important; margin: 18px 0 !important; }}
+
+/* ── Portfolio bar ── */
+.port-bar {{
+    display:flex; align-items:center; justify-content:space-between;
+    background:rgba(7,17,31,0.95); border:1px solid rgba(0,180,255,0.12);
+    border-radius:8px; padding:10px 20px; margin-bottom:20px;
+}}
+.port-item {{ display:flex; flex-direction:column; gap:2px; }}
+.port-label {{ font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:{TEXT3}; }}
+.port-value {{ font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; color:{TEXT}; }}
+.port-sub   {{ font-size:10px; color:{TEXT2}; }}
+.divider-v  {{ width:1px; height:36px; background:rgba(0,180,255,0.1); }}
+
+/* ── Section header ── */
+.sec-hdr {{
+    font-size:9px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:{TEXT3};
+    display:flex; align-items:center; gap:12px; margin-bottom:14px; margin-top:4px;
+}}
+.sec-hdr::after {{ content:''; flex:1; height:1px; background:linear-gradient(90deg, rgba(0,180,255,0.15), transparent); }}
+.sec-badge {{
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:{TEXT2};
+    background:rgba(0,180,255,0.06); border:1px solid rgba(0,180,255,0.12);
+    padding:1px 8px; border-radius:20px;
 }}
 
-/* ── Sidebar ── */
-section[data-testid="stSidebar"] {{
-    background: {SURF} !important;
-    border-right: 1px solid rgba(0,180,255,0.1) !important;
+/* ── Trade recommendation card ── */
+.trade-card {{
+    position:relative; padding:18px;
+    background:linear-gradient(135deg, rgba(10,26,44,0.97) 0%, rgba(5,12,22,0.97) 100%);
+    border-radius:8px; overflow:hidden;
 }}
-[data-testid="stSidebarNav"] a {{
-    color: {TEXT3} !important; font-size: 12px !important; font-weight: 500 !important;
-    padding: 6px 12px !important; border-radius: 4px !important;
+.trade-card::before {{
+    content:''; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg, transparent, var(--acc), transparent); opacity:0.7;
 }}
-[data-testid="stSidebarNav"] a:hover {{ color: {GLOW} !important; }}
-
-/* ── Status bar ── */
-.status-bar {{
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 8px 20px;
-    background: rgba(7,17,31,0.9);
-    border: 1px solid rgba(0,180,255,0.12);
-    border-radius: 8px;
-    margin-bottom: 18px;
-    backdrop-filter: blur(10px);
+.c {{ position:absolute; width:11px; height:11px; }}
+.c-tl {{ top:0; left:0; border-top:2px solid var(--acc); border-left:2px solid var(--acc); border-radius:2px 0 0 0; }}
+.c-tr {{ top:0; right:0; border-top:2px solid var(--acc); border-right:2px solid var(--acc); border-radius:0 2px 0 0; }}
+.c-bl {{ bottom:0; left:0; border-bottom:2px solid var(--acc); border-left:2px solid var(--acc); border-radius:0 0 0 2px; }}
+.c-br {{ bottom:0; right:0; border-bottom:2px solid var(--acc); border-right:2px solid var(--acc); border-radius:0 0 2px 0; }}
+.card-top {{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }}
+.card-ticker {{ font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:700; line-height:1; }}
+.card-action {{
+    font-size:11px; font-weight:800; letter-spacing:2px;
+    padding:5px 12px; border-radius:4px; margin-top:6px; display:inline-block;
 }}
-.status-item {{ display: flex; align-items: center; gap: 8px; }}
-.status-dot {{
-    width: 7px; height: 7px; border-radius: 50%;
-    animation: pulse-dot 2s infinite;
+.card-window {{ font-size:11px; color:{TEXT2}; margin-top:4px; }}
+.card-divider {{ height:1px; background:rgba(0,180,255,0.08); margin:12px 0; }}
+.stars {{ font-size:16px; letter-spacing:2px; margin-bottom:6px; }}
+.card-reason {{
+    font-size:12px; color:{TEXT}; line-height:1.5;
+    background:rgba(0,0,0,0.2); border-radius:4px; padding:8px 10px;
+    border-left:2px solid var(--acc); margin-bottom:12px;
 }}
-@keyframes pulse-dot {{
-    0%, 100% {{ opacity: 1; box-shadow: 0 0 4px currentColor; }}
-    50%       {{ opacity: 0.5; box-shadow: 0 0 10px currentColor; }}
+.card-row {{ display:flex; justify-content:space-between; align-items:center; }}
+.card-position {{
+    font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700;
 }}
-.status-label {{ font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }}
-.status-val   {{ font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
-
-/* ── Section label ── */
-.section-label {{
-    font-size: 9px; font-weight: 700; letter-spacing: 3px;
-    text-transform: uppercase; color: {TEXT3};
-    margin-bottom: 12px; display: flex; align-items: center; gap: 10px;
+.auto-yes {{
+    display:inline-flex; align-items:center; gap:5px;
+    background:rgba(0,255,136,0.1); border:1px solid rgba(0,255,136,0.3);
+    color:{GREEN}; font-size:10px; font-weight:700; letter-spacing:1px;
+    padding:4px 10px; border-radius:4px;
 }}
-.section-label::after {{
-    content: ''; flex: 1; height: 1px;
-    background: linear-gradient(90deg, rgba(0,180,255,0.2), transparent);
-}}
-
-/* ── Pick card ── */
-.pick-card {{
-    position: relative;
-    background: linear-gradient(135deg, rgba(12,29,48,0.95) 0%, rgba(7,17,31,0.95) 100%);
-    border: 1px solid rgba(0,180,255,0.15);
-    border-radius: 8px;
-    padding: 16px;
-    cursor: pointer;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    overflow: hidden;
-}}
-.pick-card::before {{
-    content: '';
-    position: absolute; top: 0; left: 0; right: 0; height: 1px;
-    background: linear-gradient(90deg, transparent, var(--card-accent, {GLOW}), transparent);
-    opacity: 0.6;
-}}
-/* Corner brackets */
-.c {{ position: absolute; width: 10px; height: 10px; }}
-.c-tl {{ top: 0; left: 0; border-top: 2px solid var(--card-accent, {GLOW}); border-left: 2px solid var(--card-accent, {GLOW}); border-radius: 2px 0 0 0; }}
-.c-tr {{ top: 0; right: 0; border-top: 2px solid var(--card-accent, {GLOW}); border-right: 2px solid var(--card-accent, {GLOW}); border-radius: 0 2px 0 0; }}
-.c-bl {{ bottom: 0; left: 0; border-bottom: 2px solid var(--card-accent, {GLOW}); border-left: 2px solid var(--card-accent, {GLOW}); border-radius: 0 0 0 2px; }}
-.c-br {{ bottom: 0; right: 0; border-bottom: 2px solid var(--card-accent, {GLOW}); border-right: 2px solid var(--card-accent, {GLOW}); border-radius: 0 0 2px 0; }}
-
-.pick-top {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }}
-.pick-ticker {{ font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; line-height: 1; }}
-.pick-dir {{
-    display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; font-weight: 700; letter-spacing: 1px;
-    padding: 3px 8px; border-radius: 3px; margin-top: 5px;
-}}
-.pick-dur {{ font-size: 10px; color: {TEXT2}; margin-top: 3px; }}
-
-/* Score ring is SVG, handled inline */
-
-/* Signal bars */
-.bar-wrap {{ margin-bottom: 14px; }}
-.bar-row  {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
-.bar-lbl  {{ font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: {TEXT2}; width: 76px; flex-shrink: 0; }}
-.bar-track {{
-    flex: 1; height: 5px; background: rgba(0,180,255,0.08);
-    border-radius: 3px; overflow: hidden; position: relative;
-}}
-.bar-fill {{
-    height: 5px; border-radius: 3px;
-    position: relative;
-    animation: bar-in 0.8s ease-out forwards;
-}}
-@keyframes bar-in {{
-    from {{ width: 0 !important; opacity: 0; }}
-    to   {{ opacity: 1; }}
-}}
-.bar-pct {{
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; font-weight: 600;
-    min-width: 28px; text-align: right;
+.auto-no {{
+    display:inline-flex; align-items:center; gap:5px;
+    background:rgba(0,0,0,0.2); border:1px solid rgba(0,180,255,0.1);
+    color:{TEXT2}; font-size:10px; font-weight:600;
+    padding:4px 10px; border-radius:4px;
 }}
 
-/* Stats row */
-.stats-row {{
-    display: grid; grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px; margin-top: 4px;
-    border-top: 1px solid rgba(0,180,255,0.08);
-    padding-top: 10px;
+/* ── Open position row ── */
+.pos-card {{
+    background:{SURF}; border:1px solid rgba(0,180,255,0.1); border-radius:8px;
+    padding:14px 18px; margin-bottom:8px;
+    display:grid; grid-template-columns:80px 80px 1fr 1fr 1fr 1fr;
+    align-items:center; gap:12px;
 }}
-.stat-cell {{ display: flex; flex-direction: column; gap: 2px; }}
-.stat-lbl  {{ font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: {TEXT3}; }}
-.stat-val  {{ font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: {TEXT}; }}
+.pos-ticker {{ font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; }}
+.pos-side-long  {{ background:rgba(0,255,136,0.1); border:1px solid rgba(0,255,136,0.3); color:{GREEN}; font-size:9px; font-weight:800; letter-spacing:1px; padding:2px 8px; border-radius:3px; }}
+.pos-side-short {{ background:rgba(255,45,120,0.1); border:1px solid rgba(255,45,120,0.3); color:{RED};   font-size:9px; font-weight:800; letter-spacing:1px; padding:2px 8px; border-radius:3px; }}
+.pos-col {{ display:flex; flex-direction:column; gap:2px; }}
+.pos-lbl {{ font-size:9px; font-weight:600; letter-spacing:1px; text-transform:uppercase; color:{TEXT3}; }}
+.pos-val {{ font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:600; color:{TEXT}; }}
 
-/* Kelly row */
-.kelly-row {{
-    display: flex; justify-content: space-between; align-items: center;
-    background: rgba(0,180,255,0.05);
-    border: 1px solid rgba(0,180,255,0.1);
-    border-radius: 5px; padding: 7px 10px; margin-top: 10px;
-}}
-.kelly-lbl {{ font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: {TEXT2}; }}
-.kelly-val {{ font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; }}
-
-/* Chart container */
-.chart-wrap {{
-    background: {SURF};
-    border: 1px solid rgba(0,180,255,0.12);
-    border-radius: 8px; overflow: hidden;
-    margin-top: 6px;
-}}
-
-/* No-data screen */
+/* ── No data ── */
 .waiting {{
-    min-height: 60vh; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 16px; text-align: center;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:60px 20px; text-align:center; gap:14px;
 }}
-.waiting-ring {{
-    width: 100px; height: 100px;
-    border: 2px solid rgba(0,180,255,0.15);
-    border-top: 2px solid {GLOW};
-    border-radius: 50%;
-    animation: spin 1.5s linear infinite;
+.wait-ring {{
+    width:80px; height:80px;
+    border:2px solid rgba(0,180,255,0.1); border-top:2px solid {GLOW};
+    border-radius:50%; animation:spin 1.4s linear infinite;
 }}
-@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-.waiting-title {{ font-size: 18px; font-weight: 600; color: {TEXT}; }}
-.waiting-sub   {{ font-size: 12px; color: {TEXT2}; line-height: 1.8; }}
-
-/* Hide Streamlit top toolbar */
-header[data-testid="stHeader"] {{ display: none !important; }}
-.stAppHeader {{ display: none !important; }}
-#stDecoration {{ display: none !important; }}
-
-/* Streamlit overrides */
-hr {{ border-color: rgba(0,180,255,0.08) !important; margin: 16px 0 !important; }}
-.stButton > button {{
-    background: rgba(0,180,255,0.1) !important;
-    color: {GLOW} !important;
-    border: 1px solid rgba(0,180,255,0.3) !important;
-    border-radius: 6px !important;
-    font-size: 12px !important; font-weight: 600 !important;
-    letter-spacing: 0.5px;
-}}
-.stButton > button:hover {{ background: rgba(0,180,255,0.18) !important; }}
-.stSelectbox label {{ color: {TEXT2} !important; font-size: 11px !important; }}
-div[data-testid="stSelectbox"] > div {{ background: {SURF} !important; border-color: rgba(0,180,255,0.15) !important; }}
-.block-container {{ padding-top: 18px !important; }}
+@keyframes spin {{ to {{ transform:rotate(360deg); }} }}
+@keyframes blink {{ 0%,100%{{opacity:1}} 50%{{opacity:0.25}} }}
 </style>
 """, unsafe_allow_html=True)
 
-# ─── HELPERS ──────────────────────────────────────────────────────────────────
+# ── DATA ──────────────────────────────────────────────────────────────────────
+picks_df   = None
+last_scan  = ""
+acct       = {}
+positions  = []
+alpaca_ok  = False
+is_live    = False
 
-def score_ring(score: float, accent: str, size: int = 62) -> str:
-    """SVG circular progress ring for score."""
-    r   = size // 2 - 6
-    cx  = cy = size // 2
-    circ = 2 * math.pi * r
-    fill = circ * (score / 100)
-    offset = circ - fill
-    color = GREEN if score >= 70 else AMBER if score >= 50 else TEXT2
-    font = max(12, size // 5)
-    return (
-        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" style="flex-shrink:0;">'
-        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="rgba(0,180,255,0.1)" stroke-width="4"/>'
-        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{color}" stroke-width="4"'
-        f' stroke-dasharray="{circ:.1f}" stroke-dashoffset="{offset:.1f}"'
-        f' stroke-linecap="round" transform="rotate(-90 {cx} {cy})"'
-        f' style="filter:drop-shadow(0 0 4px {color});"/>'
-        f'<text x="{cx}" y="{cy+font//3}" text-anchor="middle"'
-        f' fill="{color}" font-size="{font}" font-weight="700" font-family="JetBrains Mono,monospace">'
-        f'{score:.0f}</text>'
-        f'</svg>'
-    )
-
-def signal_bar(label: str, pct: int, color: str) -> str:
-    return (
-        f'<div class="bar-row">'
-        f'<span class="bar-lbl">{label}</span>'
-        f'<div class="bar-track">'
-        f'<div class="bar-fill" style="width:{pct}%;background:{color};'
-        f'box-shadow:0 0 8px {color}66;"></div></div>'
-        f'<span class="bar-pct" style="color:{color};">{pct}%</span>'
-        f'</div>'
-    )
-
-def pick_card(row) -> str:
-    ticker  = row.get("ticker", "")
-    score   = float(row.get("score", 0))
-    direct  = row.get("direction", "mixed")
-    conf    = row.get("confidence", "—")
-    dur     = row.get("duration", "—")
-    rsi     = row.get("rsi", 0) or 0
-    vol     = row.get("volume_ratio", 0) or 0
-    kelly   = row.get("dollar_amount", 0) or 0
-    bb_pct  = row.get("bb_pct", 0) or 0
-    sent    = row.get("sentiment_score", 0) or 0
-    xgb     = row.get("xgb_prob", 0) or 0
-
-    if direct == "bullish":
-        accent, dir_bg, dir_txt, dir_label = GREEN, "rgba(0,255,136,0.1)", GREEN, "↑ LONG"
-    elif direct == "bearish":
-        accent, dir_bg, dir_txt, dir_label = RED, "rgba(255,45,120,0.1)", RED, "↓ SHORT"
-    else:
-        accent, dir_bg, dir_txt, dir_label = AMBER, "rgba(255,170,0,0.1)", AMBER, "◆ WATCH"
-
-    conf_c = {GREEN: "#00ff88", AMBER: "#ffaa00"}.get(
-        {"High": GREEN, "Medium": AMBER}.get(conf, TEXT2), TEXT2)
-
-    bb_v   = max(0, min(100, int((1 - bb_pct) * 100))) if bb_pct else int(score * 0.85)
-    vol_v  = max(0, min(100, int((float(vol) / 4) * 100))) if vol else int(score * 0.65)
-    sent_v = max(0, min(100, int((float(sent) + 1) * 50))) if sent else int(score * 0.58)
-    xgb_v  = max(0, min(100, int(float(xgb) * 100))) if xgb else int(score * 0.75)
-
-    ks = f"${kelly:,.0f}" if kelly else "—"
-    rs = f"{float(rsi):.0f}" if rsi else "—"
-    vs = f"{float(vol):.1f}×" if vol else "—"
-
-    ring = score_ring(score, accent)
-
-    bars = (signal_bar("BB SQUEEZE",  bb_v,   GLOW) +
-            signal_bar("VOLUME",      vol_v,  GREEN) +
-            signal_bar("SENTIMENT",   sent_v, AMBER) +
-            signal_bar("XGBOOST",     xgb_v,  accent))
-
-    return f"""
-<div class="pick-card" style="--card-accent:{accent};">
-  <span class="c c-tl" style="border-color:{accent};"></span>
-  <span class="c c-tr" style="border-color:{accent};"></span>
-  <span class="c c-bl" style="border-color:{accent};"></span>
-  <span class="c c-br" style="border-color:{accent};"></span>
-
-  <div class="pick-top">
-    <div>
-      <div class="pick-ticker" style="color:{accent};text-shadow:0 0 16px {accent}66;">{ticker}</div>
-      <div class="pick-dir" style="background:{dir_bg};color:{dir_txt};border:1px solid {dir_txt}44;">
-        {dir_label}
-      </div>
-      <div class="pick-dur">{dur} &nbsp;·&nbsp; <span style="color:{conf_c};">{conf}</span></div>
-    </div>
-    {ring}
-  </div>
-
-  <div class="bar-wrap">{bars}</div>
-
-  <div class="stats-row">
-    <div class="stat-cell">
-      <span class="stat-lbl">RSI</span>
-      <span class="stat-val">{rs}</span>
-    </div>
-    <div class="stat-cell">
-      <span class="stat-lbl">Volume</span>
-      <span class="stat-val">{vs}</span>
-    </div>
-    <div class="stat-cell">
-      <span class="stat-lbl">Auto-trade</span>
-      <span class="stat-val" style="color:{'#00ff88' if score >= 70 else '#4a7a9b'};">
-        {'✓ YES' if score >= 70 else '○ NO'}
-      </span>
-    </div>
-  </div>
-
-  <div class="kelly-row">
-    <span class="kelly-lbl">Kelly Position</span>
-    <span class="kelly-val" style="color:{GREEN};text-shadow:0 0 10px {GREEN}55;">{ks}</span>
-  </div>
-</div>"""
-
-# ─── DATA ─────────────────────────────────────────────────────────────────────
-picks_df = None
-last_scan = ""
 try:
     from db import load_predictions_for_date, db_available
     if db_available():
@@ -339,152 +162,282 @@ try:
 except Exception:
     pass
 
-n_picks = len(picks_df) if picks_df is not None and not picks_df.empty else 0
-n_auto  = int((picks_df["score"] >= 70).sum()) if picks_df is not None and not picks_df.empty and "score" in picks_df.columns else 0
-
-# Alpaca status
-alpaca_ok = False
-alpaca_label = "NOT CONNECTED"
 try:
-    from execution.alpaca import is_configured, is_live_mode
+    from execution.alpaca import get_account, get_positions, is_configured, is_live_mode
     alpaca_ok = is_configured()
-    alpaca_label = ("🔴 LIVE" if is_live_mode() else "PAPER") if alpaca_ok else "NOT CONNECTED"
+    is_live   = is_live_mode()
+    if alpaca_ok:
+        acct      = get_account()
+        positions = get_positions()
 except Exception:
     pass
 
-# ─── STATUS BAR ───────────────────────────────────────────────────────────────
-scan_info = f"Last scan {last_scan}" if last_scan else "Runs 8 AM ET weekdays"
+n_picks = len(picks_df) if picks_df is not None and not picks_df.empty else 0
+n_auto  = int((picks_df["score"] >= 70).sum()) if picks_df is not None and not picks_df.empty and "score" in picks_df.columns else 0
+
+# ── PORTFOLIO BAR ─────────────────────────────────────────────────────────────
+portfolio   = acct.get("portfolio_value", 0)
+buying_power= acct.get("buying_power", 0)
+mode_label  = ("🔴 LIVE" if is_live else "PAPER") if alpaca_ok else "NOT CONNECTED"
+mode_color  = RED if is_live else AMBER if alpaca_ok else TEXT3
+
+agent_dot   = GREEN if last_scan else TEXT3
+
 st.markdown(f"""
-<div class="status-bar">
-  <div style="display:flex;align-items:center;gap:24px;">
-    <div class="status-item">
-      <div class="status-dot" style="background:{GREEN if n_picks else TEXT3};color:{GREEN if n_picks else TEXT3};"></div>
-      <span class="status-label" style="color:{TEXT2};">Agent</span>
-      <span class="status-val" style="color:{TEXT};">{scan_info}</span>
+<div class="port-bar">
+  <div style="display:flex;align-items:center;gap:28px;">
+    <div class="port-item">
+      <span class="port-label">Portfolio</span>
+      <span class="port-value">${portfolio:,.2f}</span>
+      <span class="port-sub">Total equity</span>
     </div>
-    <div class="status-item">
-      <div class="status-dot" style="background:{GREEN if alpaca_ok else AMBER};color:{GREEN if alpaca_ok else AMBER};"></div>
-      <span class="status-label" style="color:{TEXT2};">Alpaca</span>
-      <span class="status-val" style="color:{GREEN if alpaca_ok else AMBER};">{alpaca_label}</span>
+    <div class="divider-v"></div>
+    <div class="port-item">
+      <span class="port-label">Buying Power</span>
+      <span class="port-value">${buying_power:,.2f}</span>
+      <span class="port-sub">Available</span>
     </div>
-    <div class="status-item">
-      <div class="status-dot" style="background:{GLOW};color:{GLOW};"></div>
-      <span class="status-label" style="color:{TEXT2};">Auto-trade</span>
-      <span class="status-val" style="color:{TEXT};">Score ≥ 70 &nbsp;·&nbsp; {n_auto} eligible today</span>
+    <div class="divider-v"></div>
+    <div class="port-item">
+      <span class="port-label">Open Positions</span>
+      <span class="port-value" style="color:{GREEN if positions else TEXT2};">{len(positions)}</span>
+      <span class="port-sub">Active trades</span>
+    </div>
+    <div class="divider-v"></div>
+    <div class="port-item">
+      <span class="port-label">Alpaca</span>
+      <span class="port-value" style="font-size:14px;color:{mode_color};">{mode_label}</span>
+      <span class="port-sub">Trading mode</span>
     </div>
   </div>
-  <div class="status-item">
-    <span class="status-val" style="color:{TEXT2};">{n_picks} setups &nbsp;·&nbsp; {datetime.today().strftime('%b %d %Y')}</span>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div style="display:flex;align-items:center;gap:7px;">
+      <div style="width:7px;height:7px;border-radius:50%;background:{agent_dot};animation:blink 2s infinite;box-shadow:0 0 6px {agent_dot};"></div>
+      <span style="font-size:11px;color:{TEXT2};">Last scan {last_scan if last_scan else 'pending'}</span>
+    </div>
+    <span style="font-size:11px;color:{TEXT3};">{datetime.today().strftime('%b %d %Y')}</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ─── MAIN CONTENT ─────────────────────────────────────────────────────────────
+# ── HELPERS ───────────────────────────────────────────────────────────────────
+def stars(score):
+    filled = round(score / 20)
+    return "★" * filled + "☆" * (5 - filled)
+
+def plain_reason(row):
+    sigs = row.get("signals_triggered", [])
+    if isinstance(sigs, str):
+        sigs = [s.strip() for s in sigs.split(";") if s.strip()]
+    direct = row.get("direction", "mixed")
+    conf   = row.get("confidence", "Low")
+    vol    = row.get("volume_ratio", 0) or 0
+    rsi    = row.get("rsi", 50) or 50
+    score  = float(row.get("score", 0))
+    parts  = []
+    if vol and float(vol) >= 1.5:
+        parts.append(f"volume is {float(vol):.1f}× above average")
+    if rsi and float(rsi) < 35:
+        parts.append(f"RSI at {float(rsi):.0f} — oversold territory")
+    elif rsi and float(rsi) > 65:
+        parts.append(f"RSI at {float(rsi):.0f} — overbought territory")
+    if "BB" in str(sigs) or "bb" in str(sigs):
+        parts.append("Bollinger Band squeeze detected")
+    if score >= 70 and direct == "bullish":
+        parts.append("XGBoost model strongly favors upside")
+    elif score >= 70 and direct == "bearish":
+        parts.append("XGBoost model strongly favors downside")
+    if not parts:
+        parts.append(f"Multiple signals align for a {direct} setup")
+    return ". ".join(p.capitalize() for p in parts[:3]) + "."
+
+def score_ring_svg(score, accent, size=64):
+    r    = size // 2 - 7
+    cx   = cy = size // 2
+    circ = 2 * math.pi * r
+    off  = circ * (1 - score / 100)
+    c    = GREEN if score >= 70 else AMBER if score >= 50 else TEXT2
+    fs   = max(11, size // 5)
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
+        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="rgba(0,180,255,0.08)" stroke-width="5"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{c}" stroke-width="5"'
+        f' stroke-dasharray="{circ:.1f}" stroke-dashoffset="{off:.1f}"'
+        f' stroke-linecap="round" transform="rotate(-90 {cx} {cy})"'
+        f' style="filter:drop-shadow(0 0 5px {c});"/>'
+        f'<text x="{cx}" y="{cy + fs//3}" text-anchor="middle" fill="{c}"'
+        f' font-size="{fs}" font-weight="700" font-family="JetBrains Mono,monospace">{score:.0f}</text>'
+        f'</svg>'
+    )
+
+# ── TODAY'S TRADE RECOMMENDATIONS ────────────────────────────────────────────
+st.markdown(
+    f'<div class="sec-hdr">Today\'s Trade Recommendations'
+    f'<span class="sec-badge">{n_picks} found</span></div>',
+    unsafe_allow_html=True)
+
 if picks_df is not None and not picks_df.empty:
     sorted_df = picks_df.sort_values("score", ascending=False)
-
-    st.markdown(
-        f'<div class="section-label">Today\'s Predictions &nbsp;·&nbsp; {n_picks} setups flagged</div>',
-        unsafe_allow_html=True)
-
-    # Card grid — 3 per row
     chunks = [sorted_df.iloc[i:i+3] for i in range(0, len(sorted_df), 3)]
     for chunk in chunks:
         cols = st.columns(3)
         for ci, (_, row) in enumerate(chunk.iterrows()):
-            with cols[ci]:
-                st.markdown(pick_card(row), unsafe_allow_html=True)
-        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+            ticker = row.get("ticker", "")
+            score  = float(row.get("score", 0))
+            direct = row.get("direction", "mixed")
+            dur    = row.get("duration", "—")
+            kelly  = row.get("dollar_amount", 0) or 0
+            auto   = score >= 70 and alpaca_ok
 
-    # ── Chart ──────────────────────────────────────────────────────────────────
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            if direct == "bullish":
+                acc   = GREEN
+                action_label = "BUY LONG"
+                action_bg    = "rgba(0,255,136,0.12)"
+                action_border= "rgba(0,255,136,0.35)"
+            elif direct == "bearish":
+                acc   = RED
+                action_label = "SELL SHORT"
+                action_bg    = "rgba(255,45,120,0.12)"
+                action_border= "rgba(255,45,120,0.35)"
+            else:
+                acc   = AMBER
+                action_label = "WATCH"
+                action_bg    = "rgba(255,170,0,0.10)"
+                action_border= "rgba(255,170,0,0.30)"
+
+            reason = plain_reason(row)
+            ring   = score_ring_svg(score, acc)
+            ks     = f"${kelly:,.0f}" if kelly else "—"
+            star_html = f'<div class="stars" style="color:{acc};">{stars(score)}</div>'
+            auto_html = (
+                f'<span class="auto-yes">⚡ AUTO-EXECUTING</span>'
+                if auto else
+                f'<span class="auto-no">Manual — score &lt; 70</span>'
+            )
+
+            card = f"""
+<div class="trade-card" style="--acc:{acc};border:1px solid {acc}22;">
+  <span class="c c-tl"></span><span class="c c-tr"></span>
+  <span class="c c-bl"></span><span class="c c-br"></span>
+  <div class="card-top">
+    <div>
+      <div class="card-ticker" style="color:{acc};text-shadow:0 0 18px {acc}55;">{ticker}</div>
+      <div class="card-action" style="background:{action_bg};border:1px solid {action_border};color:{acc};">{action_label}</div>
+      <div class="card-window">{dur}</div>
+    </div>
+    {ring}
+  </div>
+  <div class="card-divider"></div>
+  {star_html}
+  <div class="card-reason">{reason}</div>
+  <div class="card-row">
+    <div>
+      <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:{TEXT3};margin-bottom:3px;">Position Size</div>
+      <div class="card-position" style="color:{acc};">{ks}</div>
+    </div>
+    {auto_html}
+  </div>
+</div>"""
+            with cols[ci]:
+                st.markdown(card, unsafe_allow_html=True)
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+else:
+    st.markdown(f"""
+    <div class="waiting">
+      <div class="wait-ring"></div>
+      <div style="font-size:16px;font-weight:600;color:{TEXT};">Waiting for today's scan</div>
+      <div style="font-size:13px;color:{TEXT2};line-height:1.8;">
+        The AI agent runs automatically every weekday at <strong style="color:{GLOW};">8:00 AM ET</strong>.<br>
+        Results appear here automatically. First run was triggered today — check back shortly.
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+# ── OPEN POSITIONS ────────────────────────────────────────────────────────────
+st.divider()
+st.markdown(
+    f'<div class="sec-hdr">Open Positions'
+    f'<span class="sec-badge">{len(positions)}</span></div>',
+    unsafe_allow_html=True)
+
+if positions:
+    total_pl = sum(p.get("unrealized_pl", 0) for p in positions)
+    total_color = GREEN if total_pl >= 0 else RED
     st.markdown(
-        f'<div class="section-label">Chart</div>',
+        f'<div style="font-family:JetBrains Mono,monospace;font-size:13px;'
+        f'color:{total_color};margin-bottom:12px;">'
+        f'Total unrealized P&amp;L: {"+" if total_pl >= 0 else ""}{total_pl:,.2f}</div>',
+        unsafe_allow_html=True)
+    for p in positions:
+        pl     = p.get("unrealized_pl", 0)
+        pl_pct = p.get("unrealized_pl_pct", 0)
+        pc     = GREEN if pl >= 0 else RED
+        arrow  = "▲" if pl >= 0 else "▼"
+        side   = str(p.get("side", "long")).upper()
+        side_cls = "pos-side-long" if side == "LONG" else "pos-side-short"
+        st.markdown(f"""
+<div class="pos-card">
+  <div class="pos-ticker" style="color:{GLOW};">{p['ticker']}</div>
+  <div><span class="{side_cls}">{side}</span></div>
+  <div class="pos-col"><span class="pos-lbl">Qty</span><span class="pos-val">{p['qty']:.0f}</span></div>
+  <div class="pos-col"><span class="pos-lbl">Market Value</span><span class="pos-val">${p['market_value']:,.2f}</span></div>
+  <div class="pos-col">
+    <span class="pos-lbl">P&amp;L</span>
+    <span class="pos-val" style="color:{pc};">{arrow} ${abs(pl):,.2f}</span>
+  </div>
+  <div class="pos-col">
+    <span class="pos-lbl">Return</span>
+    <span class="pos-val" style="color:{pc};">{arrow} {abs(pl_pct):.2f}%</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+elif alpaca_ok:
+    st.markdown(
+        f'<div style="color:{TEXT3};font-size:13px;padding:16px 0;">No open positions right now.</div>',
+        unsafe_allow_html=True)
+else:
+    st.markdown(
+        f'<div style="color:{TEXT3};font-size:13px;padding:16px 0;">Alpaca not connected — add API keys to see positions.</div>',
         unsafe_allow_html=True)
 
-    tickers = sorted_df["ticker"].tolist()
-    sel = st.selectbox("", tickers, label_visibility="collapsed")
-
+# ── CHART ─────────────────────────────────────────────────────────────────────
+if picks_df is not None and not picks_df.empty:
+    st.divider()
+    st.markdown(f'<div class="sec-hdr">Price Chart</div>', unsafe_allow_html=True)
+    sorted_df = picks_df.sort_values("score", ascending=False)
+    sel = st.selectbox("", sorted_df["ticker"].tolist(), label_visibility="collapsed")
     if sel:
         try:
             from data.fetcher import get_ohlcv
             from ta.volatility import BollingerBands as BB
-            from ta.momentum  import RSIIndicator
-
             df_c = get_ohlcv(sel, period="6mo")
             if not df_c.empty:
                 _bb  = BB(df_c["Close"], window=20, window_dev=2)
-                _rsi = RSIIndicator(df_c["Close"], window=14).rsi()
-
-                fig = go.Figure()
-
-                # BB bands
+                fig  = go.Figure()
                 try:
-                    fig.add_trace(go.Scatter(
-                        x=df_c.index, y=_bb.bollinger_hband(),
-                        line=dict(color="rgba(0,212,255,0.2)", width=1),
-                        showlegend=False, name="BB Upper"))
-                    fig.add_trace(go.Scatter(
-                        x=df_c.index, y=_bb.bollinger_lband(),
-                        line=dict(color="rgba(0,212,255,0.2)", width=1),
-                        fill="tonexty", fillcolor="rgba(0,212,255,0.04)",
-                        showlegend=False, name="BB Lower"))
+                    fig.add_trace(go.Scatter(x=df_c.index, y=_bb.bollinger_hband(),
+                        line=dict(color=f"rgba(0,212,255,0.2)", width=1), showlegend=False))
+                    fig.add_trace(go.Scatter(x=df_c.index, y=_bb.bollinger_lband(),
+                        line=dict(color=f"rgba(0,212,255,0.2)", width=1),
+                        fill="tonexty", fillcolor="rgba(0,212,255,0.04)", showlegend=False))
                 except Exception:
                     pass
-
-                # Candles
                 fig.add_trace(go.Candlestick(
-                    x=df_c.index,
-                    open=df_c["Open"], high=df_c["High"],
-                    low=df_c["Low"],   close=df_c["Close"],
-                    name=sel,
-                    increasing=dict(line=dict(color=GREEN, width=1.2),
-                                    fillcolor="rgba(0,255,136,0.2)"),
-                    decreasing=dict(line=dict(color=RED, width=1.2),
-                                    fillcolor="rgba(255,45,120,0.2)")))
-
-                row_data = sorted_df[sorted_df["ticker"] == sel].iloc[0]
-                score    = float(row_data.get("score", 0))
-                direct   = row_data.get("direction", "mixed")
-                accent   = GREEN if direct == "bullish" else RED if direct == "bearish" else AMBER
-
+                    x=df_c.index, open=df_c["Open"], high=df_c["High"],
+                    low=df_c["Low"], close=df_c["Close"], name=sel,
+                    increasing=dict(line=dict(color=GREEN, width=1.2), fillcolor="rgba(0,255,136,0.2)"),
+                    decreasing=dict(line=dict(color=RED,   width=1.2), fillcolor="rgba(255,45,120,0.2)")))
+                row_d  = sorted_df[sorted_df["ticker"] == sel].iloc[0]
+                direct = row_d.get("direction","mixed")
+                acc2   = GREEN if direct == "bullish" else RED if direct == "bearish" else AMBER
                 fig.update_layout(
-                    xaxis_rangeslider_visible=False,
-                    height=360,
+                    xaxis_rangeslider_visible=False, height=360,
                     paper_bgcolor=SURF, plot_bgcolor=SURF,
-                    xaxis=dict(
-                        gridcolor="rgba(0,180,255,0.06)",
-                        tickfont=dict(color=TEXT2, size=10),
-                        showgrid=True),
-                    yaxis=dict(
-                        gridcolor="rgba(0,180,255,0.06)",
-                        tickfont=dict(color=TEXT2, size=10),
-                        showgrid=True, side="right"),
-                    margin=dict(l=0, r=56, t=28, b=0),
+                    xaxis=dict(gridcolor="rgba(0,180,255,0.06)", tickfont=dict(color=TEXT2, size=10)),
+                    yaxis=dict(gridcolor="rgba(0,180,255,0.06)", tickfont=dict(color=TEXT2, size=10), side="right"),
+                    margin=dict(l=0, r=52, t=28, b=0),
                     title=dict(
-                        text=f"<b style='color:{accent}'>{sel}</b>"
-                             f"<span style='color:{TEXT2};font-size:12px;'>"
-                             f"  ·  Score {score:.0f}  ·  6-Month</span>",
-                        font=dict(color=TEXT, size=13), x=0.01),
-                )
-                st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
+                        text=f"<b style='color:{acc2}'>{sel}</b>"
+                             f"<span style='color:{TEXT2};font-size:12px;'>  ·  6-Month  ·  Bollinger Bands</span>",
+                        font=dict(color=TEXT, size=13), x=0.01))
                 st.plotly_chart(fig, use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
         except Exception as e:
-            st.markdown(
-                f'<div style="color:{TEXT2};padding:20px;text-align:center;font-size:12px;">Chart unavailable: {e}</div>',
-                unsafe_allow_html=True)
-
-else:
-    # Waiting state
-    st.markdown(f"""
-    <div class="waiting">
-      <div class="waiting-ring"></div>
-      <div class="waiting-title">Awaiting Market Scan</div>
-      <div class="waiting-sub">
-        The agent runs every weekday at <strong style="color:{GLOW};">8:00 AM ET</strong> via GitHub Actions.<br>
-        It scans S&amp;P 500 + Futures, scores setups, and writes predictions here automatically.<br><br>
-        <span style="color:{AMBER};">First run triggered — check back in ~15 minutes.</span>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+            st.markdown(f'<div style="color:{TEXT2};padding:20px;text-align:center;font-size:12px;">Chart unavailable: {e}</div>', unsafe_allow_html=True)
