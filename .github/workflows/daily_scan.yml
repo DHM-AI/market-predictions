@@ -2,10 +2,17 @@ name: Market Predictions Agent
 
 on:
   schedule:
-    - cron: '0 13 * * 1-5'    # 8:00 AM ET — pre-market scan
-    - cron: '30 16 * * 1-5'   # 11:30 AM ET — midday re-scan
-    - cron: '0 20 * * 1-5'    # 3:00 PM ET — near-close scan
-    - cron: '0 14 * * 0'      # Sunday 9 AM ET — weekly post-mortem
+    # All times in UTC. Market hours ET = UTC-4 (EDT, summer) / UTC-5 (EST, winter)
+    # Currently EDT (UTC-4):
+    - cron: '0 11 * * 1-5'    #  7:00 AM ET — pre-market open
+    - cron: '0 13 * * 1-5'    #  9:00 AM ET — market just opened
+    - cron: '30 14 * * 1-5'   # 10:30 AM ET — mid-morning momentum
+    - cron: '0 16 * * 1-5'    # 12:00 PM ET — midday
+    - cron: '0 18 * * 1-5'    #  2:00 PM ET — early afternoon
+    - cron: '30 19 * * 1-5'   #  3:30 PM ET — power hour
+    - cron: '0 20 * * 1-5'    #  4:00 PM ET — after-hours check
+    - cron: '0 14 * * 0'      # Sunday 10 AM ET — weekly post-mortem
+
   workflow_dispatch:
     inputs:
       mode:

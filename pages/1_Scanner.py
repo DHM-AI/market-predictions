@@ -313,7 +313,9 @@ with hc1:
         f'</div>',
         unsafe_allow_html=True)
 with hc2:
-    if st.button("⟳  Refresh", use_container_width=True):
+    if st.button("⟳  Refresh", use_container_width=True, key="refresh_btn"):
+        st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
 
 # ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
