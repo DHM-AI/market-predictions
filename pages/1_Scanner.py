@@ -444,7 +444,7 @@ def live_alpaca():
         + mc("Market Clock",
              _market_clock(),
              _market_status(),
-             GREEN if _is_market_open() else AMBER,
+             GREEN if _is_market_open() else RED,
              "Market time from Alpaca. GREEN = market open, AMBER = pre/after hours, shows if trading is live.")
         + f'</div>',
         unsafe_allow_html=True)
