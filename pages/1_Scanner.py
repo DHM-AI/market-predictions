@@ -195,14 +195,10 @@ div[data-testid="stSelectbox"] div {{ background:{SURF} !important; border-color
 </style>
 """, unsafe_allow_html=True)
 
-# ── DATA ──────────────────────────────────────────────────────────────────────
+# ── STATIC DATA (predictions — changes 3x/day) ────────────────────────────────
 picks_df  = None
 last_scan = ""
-acct      = {"portfolio_value": 0, "buying_power": 0, "cash": 0}
-positions = []
 trades    = []
-alpaca_ok = False
-is_live   = False
 db_ok     = False
 
 try:
@@ -216,29 +212,23 @@ try:
                 ts = pd.to_datetime(picks_df["created_at"].iloc[0])
                 last_scan = ts.strftime("%H:%M")
         try:
-            trades = load_trades()[:10]
+            trades = load_trades()[:20]
         except Exception:
             trades = []
 except Exception:
     pass
 
+# ── ALPACA CONFIG (just check credentials once) ────────────────────────────────
 try:
-    from execution.alpaca import get_account, get_positions, is_configured, is_live_mode
+    from execution.alpaca import is_configured, is_live_mode
     alpaca_ok = is_configured()
     is_live   = is_live_mode()
-    if alpaca_ok:
-        acct      = get_account()
-        positions = get_positions()
 except Exception:
-    pass
+    alpaca_ok = False
+    is_live   = False
 
 n_picks = len(picks_df) if picks_df is not None and not picks_df.empty else 0
 n_auto  = int((picks_df["score"] >= 70).sum()) if picks_df is not None and not picks_df.empty and "score" in picks_df.columns else 0
-portfolio    = acct.get("portfolio_value", 0)
-buying_power = acct.get("buying_power", 0)
-cash         = acct.get("cash", 0)
-total_pl     = sum(p.get("unrealized_pl", 0) for p in positions)
-pl_color     = GREEN if total_pl >= 0 else RED
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def stars(score):
@@ -303,7 +293,7 @@ def ring(score, acc, sz=62):
         f'</svg>'
     )
 
-# ── HEADER ROW ────────────────────────────────────────────────────────────────
+# ── HEADER (static) ───────────────────────────────────────────────────────────
 hc1, hc2 = st.columns([4, 1])
 with hc1:
     mode_badge = (
@@ -321,46 +311,144 @@ with hc1:
         f'<span style="font-size:11px;color:{TEXT3};">Last scan: {last_scan if last_scan else "pending"} &nbsp;·&nbsp; {datetime.today().strftime("%b %d %Y")}</span>'
         f'</div>',
         unsafe_allow_html=True)
-
 with hc2:
-    if st.button("⟳  Refresh Dashboard", use_container_width=True):
+    if st.button("⟳  Refresh", use_container_width=True):
         st.rerun()
 
-# ── METRIC STRIP ──────────────────────────────────────────────────────────────
-def mc(label, val, sub, color=TEXT3, tip=""):
-    tip_html = f'<div class="tip">{tip}</div>' if tip else ""
-    return (
-        f'<div class="metric-card tt" style="--mc:{color}44;">'
-        f'<div class="metric-lbl">{label}</div>'
-        f'<div class="metric-val" style="color:{color};">{val}</div>'
-        f'<div class="metric-sub">{sub}</div>'
-        f'{tip_html}'
-        f'</div>'
-    )
+# ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
+@st.fragment(run_every=30)
+def live_alpaca():
+    """Fetches fresh Alpaca data every 30 seconds — P&L, equity, positions."""
+    acct      = {"portfolio_value": 0, "buying_power": 0, "cash": 0}
+    positions = []
+    try:
+        from execution.alpaca import get_account, get_positions
+        if alpaca_ok:
+            acct      = get_account()
+            positions = get_positions()
+    except Exception:
+        pass
 
-pl_sign = "+" if total_pl >= 0 else ""
-st.markdown(
-    f'<div class="metrics-row">'
-    + mc("Portfolio Value",   f"${portfolio:,.0f}",     "Total equity",
-         GLOW,
-         "Your total Alpaca account value including all open positions and cash.")
-    + mc("Unrealized P&L",   f"{pl_sign}${total_pl:,.2f}", f"{len(positions)} positions",
-         pl_color if total_pl != 0 else TEXT2,
-         f"Total profit/loss on your {len(positions)} currently open position(s). Not yet realized — closes when you exit the trade.")
-    + mc("Buying Power",     f"${buying_power:,.0f}",   "Available to trade",
-         TEXT,
-         "Cash available to open new positions right now in Alpaca.")
-    + mc("AI Setups Today",  str(n_picks) if n_picks else "—", "Flagged by agent",
-         GREEN if n_picks else TEXT2,
-         f"Tickers flagged by the AI agent today with score ≥ 50. The agent scans S&P 500 + Futures at 8 AM ET every weekday.")
-    + mc("Auto-Executing",   str(n_auto) if n_auto else "0",  "Score ≥ 70",
-         GREEN if n_auto else TEXT2,
-         f"Setups with score ≥ 70 are automatically traded by Alpaca at market open. Score must be high enough to overcome spread + fees.")
-    + mc("DB / Agent",       "Online" if db_ok else "Offline", "Supabase",
-         GREEN if db_ok else RED,
-         "Supabase database connection status. Predictions are stored here by the GitHub Actions agent.")
-    + f'</div>',
-    unsafe_allow_html=True)
+    portfolio    = acct.get("portfolio_value", 0)
+    buying_power = acct.get("buying_power", 0)
+    total_pl     = sum(p.get("unrealized_pl", 0) for p in positions)
+    pl_color     = GREEN if total_pl >= 0 else RED
+    updated_at   = datetime.now().strftime("%H:%M:%S")
+
+    # ── Metric strip ──────────────────────────────────────────────────────────
+    def mc(label, val, sub, color=TEXT3, tip=""):
+        tip_html = f'<div class="tip">{tip}</div>' if tip else ""
+        return (
+            f'<div class="metric-card tt" style="--mc:{color}44;">'
+            f'<div class="metric-lbl">{label}</div>'
+            f'<div class="metric-val" style="color:{color};">{val}</div>'
+            f'<div class="metric-sub">{sub}</div>'
+            f'{tip_html}</div>'
+        )
+
+    pl_sign = "+" if total_pl >= 0 else ""
+    st.markdown(
+        f'<div class="metrics-row">'
+        + mc("Portfolio Value",  f"${portfolio:,.0f}",          "Total equity",
+             GLOW, "Total Alpaca account value — positions + cash.")
+        + mc("Unrealized P&L",  f"{pl_sign}${total_pl:,.2f}",  f"{len(positions)} open",
+             pl_color if total_pl != 0 else TEXT2,
+             "Live profit/loss on open positions. Not realized until closed.")
+        + mc("Buying Power",    f"${buying_power:,.0f}",        "Available now",
+             TEXT, "Cash you can deploy into new positions right now.")
+        + mc("AI Setups Today", str(n_picks) if n_picks else "—", "Score ≥ 50",
+             GREEN if n_picks else TEXT2,
+             "Tickers flagged today. Agent scans 3× daily: 8AM · 11:30AM · 3PM ET.")
+        + mc("Auto-Executing",  str(n_auto) if n_auto else "0", "Score ≥ 70",
+             GREEN if n_auto else TEXT2,
+             "These will be auto-traded via Alpaca bracket orders.")
+        + mc("Live Update",     updated_at, "Auto every 30s",
+             GLOW, "This strip refreshes every 30 seconds automatically.")
+        + f'</div>',
+        unsafe_allow_html=True)
+
+    # ── Open positions ────────────────────────────────────────────────────────
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="sec">Open Positions <span class="sec-n">{len(positions)}</span>'
+        f'<span style="font-size:9px;color:{TEXT3};margin-left:8px;">· updates every 30s</span></div>',
+        unsafe_allow_html=True)
+
+    # Confirmation state
+    if "confirm_close" not in st.session_state:
+        st.session_state["confirm_close"] = None
+
+    if st.session_state["confirm_close"]:
+        ticker_to_close = st.session_state["confirm_close"]
+        st.markdown(
+            f'<div style="background:rgba(255,45,120,0.08);border:1px solid rgba(255,45,120,0.3);'
+            f'border-radius:8px;padding:14px 18px;margin-bottom:12px;">'
+            f'<span style="color:{TEXT};font-size:13px;">⚠ Close <strong style="color:{RED};">'
+            f'{ticker_to_close}</strong> at market price right now?</span></div>',
+            unsafe_allow_html=True)
+        cc1, cc2, cc3 = st.columns([3, 1, 1])
+        with cc2:
+            if st.button("✓ Yes, close it", type="primary", use_container_width=True, key="confirm_yes"):
+                try:
+                    from execution.alpaca import close_position
+                    result = close_position(ticker_to_close)
+                    st.success(f"{ticker_to_close} closed." if result.get("status") == "closed"
+                               else f"Error: {result.get('reason')}")
+                except Exception as e:
+                    st.error(str(e))
+                st.session_state["confirm_close"] = None
+                st.rerun()
+        with cc3:
+            if st.button("✗ Cancel", use_container_width=True, key="confirm_no"):
+                st.session_state["confirm_close"] = None
+                st.rerun()
+
+    if positions:
+        for p in positions:
+            pl       = p.get("unrealized_pl", 0)
+            plpct    = p.get("unrealized_pl_pct", 0)
+            pc       = GREEN if pl >= 0 else RED
+            arrow    = "▲" if pl >= 0 else "▼"
+            side     = str(p.get("side","long")).upper()
+            badge    = "pos-badge-l" if side=="LONG" else "pos-badge-s"
+            entry    = p.get("avg_entry_price", 0)
+            current  = p.get("current_price", 0)
+            sl       = p.get("stop_loss")
+            tp       = p.get("take_profit")
+            ticker_p = p["ticker"]
+            sl_str   = f"${sl:.2f} ({abs((current-sl)/current*100):.1f}% away)" if sl and current else "Auto-set"
+            tp_str   = f"${tp:.2f} ({abs((tp-current)/current*100):.1f}% away)"  if tp and current else "Auto-set"
+
+            row_col, close_col = st.columns([6, 1])
+            with row_col:
+                st.markdown(f"""
+<div class="pos-row" style="grid-template-columns:70px 65px 1fr 1fr 1fr 1fr 1fr 1fr;">
+  <div class="pos-ticker">{ticker_p}</div>
+  <div><span class="{badge}">{side}</span></div>
+  <div class="pos-col"><span class="pos-lbl">Shares</span><span class="pos-val">{p['qty']:.0f}</span></div>
+  <div class="pos-col"><span class="pos-lbl">Entry</span><span class="pos-val">${entry:.2f}</span></div>
+  <div class="pos-col"><span class="pos-lbl">Current</span><span class="pos-val">${current:.2f}</span></div>
+  <div class="pos-col"><span class="pos-lbl">Stop Loss</span><span class="pos-val" style="color:{RED};">{sl_str}</span></div>
+  <div class="pos-col"><span class="pos-lbl">Take Profit</span><span class="pos-val" style="color:{GREEN};">{tp_str}</span></div>
+  <div class="pos-col"><span class="pos-lbl">P&amp;L</span><span class="pos-val" style="color:{pc};">{arrow} ${abs(pl):,.2f} ({abs(plpct):.1f}%)</span></div>
+</div>""", unsafe_allow_html=True)
+            with close_col:
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+                if st.button(f"✗ Close", key=f"close_{ticker_p}", use_container_width=True):
+                    st.session_state["confirm_close"] = ticker_p
+                    st.rerun()
+    elif alpaca_ok:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:13px;padding:12px 0;">'
+            f'No open positions. Next auto-trade runs when agent finds a setup with score ≥ 70.</div>',
+            unsafe_allow_html=True)
+    else:
+        st.markdown(
+            f'<div style="color:{TEXT3};font-size:13px;padding:12px 0;">'
+            f'Alpaca not connected — add API keys to enable trading.</div>',
+            unsafe_allow_html=True)
+
+live_alpaca()
 
 # ── MAIN CONTENT ──────────────────────────────────────────────────────────────
 left, right = st.columns([3, 1], gap="large")
@@ -477,136 +565,7 @@ with left:
           </div>
         </div>""", unsafe_allow_html=True)
 
-# ── OPEN POSITIONS ────────────────────────────────────────────────────────────
-st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-st.markdown(
-    f'<div class="sec">Open Positions <span class="sec-n">{len(positions)}</span></div>',
-    unsafe_allow_html=True)
-
-# Confirmation state for close
-if "confirm_close" not in st.session_state:
-    st.session_state["confirm_close"] = None
-
-if st.session_state["confirm_close"]:
-    ticker_to_close = st.session_state["confirm_close"]
-    st.markdown(
-        f'<div style="background:rgba(255,45,120,0.08);border:1px solid rgba(255,45,120,0.3);'
-        f'border-radius:8px;padding:14px 18px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">'
-        f'<span style="color:{TEXT};font-size:13px;">⚠ Close <strong style="color:{RED};">{ticker_to_close}</strong> at market price right now?</span>'
-        f'</div>',
-        unsafe_allow_html=True)
-    cc1, cc2, cc3 = st.columns([2, 1, 1])
-    with cc2:
-        if st.button("✓ Yes, close it", type="primary", use_container_width=True):
-            try:
-                from execution.alpaca import close_position
-                result = close_position(ticker_to_close)
-                if result.get("status") == "closed":
-                    st.success(f"{ticker_to_close} closed successfully.")
-                else:
-                    st.error(f"Error: {result.get('reason','Unknown error')}")
-            except Exception as e:
-                st.error(str(e))
-            st.session_state["confirm_close"] = None
-            st.rerun()
-    with cc3:
-        if st.button("✗ Cancel", use_container_width=True):
-            st.session_state["confirm_close"] = None
-            st.rerun()
-
-if positions:
-    for p in positions:
-        pl       = p.get("unrealized_pl", 0)
-        plpct    = p.get("unrealized_pl_pct", 0)
-        pc       = GREEN if pl >= 0 else RED
-        arrow    = "▲" if pl >= 0 else "▼"
-        side     = str(p.get("side","long")).upper()
-        badge    = "pos-badge-l" if side=="LONG" else "pos-badge-s"
-        entry    = p.get("avg_entry_price", 0)
-        current  = p.get("current_price", 0)
-        sl       = p.get("stop_loss")
-        tp       = p.get("take_profit")
-        ticker_p = p["ticker"]
-
-        # How far from SL/TP
-        sl_dist = f"{abs((current - sl)/current*100):.1f}% away" if sl and current else "—"
-        tp_dist = f"{abs((tp - current)/current*100):.1f}% away" if tp and current else "—"
-
-        row_col, close_col = st.columns([6, 1])
-        with row_col:
-            st.markdown(f"""
-<div class="pos-row" style="grid-template-columns:70px 70px 1fr 1fr 1fr 1fr 1fr 1fr;">
-  <div class="pos-ticker">{ticker_p}</div>
-  <div><span class="{badge}">{side}</span></div>
-  <div class="pos-col">
-    <span class="pos-lbl">Shares</span>
-    <span class="pos-val">{p['qty']:.0f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Entry</span>
-    <span class="pos-val">${entry:.2f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Current</span>
-    <span class="pos-val">${current:.2f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Stop Loss</span>
-    <span class="pos-val" style="color:{RED};">${sl:.2f} <span style="font-size:10px;color:{TEXT3};">({sl_dist})</span></span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Take Profit</span>
-    <span class="pos-val" style="color:{GREEN};">${tp:.2f} <span style="font-size:10px;color:{TEXT3};">({tp_dist})</span></span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">P&amp;L</span>
-    <span class="pos-val" style="color:{pc};">{arrow} ${abs(pl):,.2f} ({abs(plpct):.1f}%)</span>
-  </div>
-</div>""" if sl and tp else f"""
-<div class="pos-row">
-  <div class="pos-ticker">{ticker_p}</div>
-  <div><span class="{badge}">{side}</span></div>
-  <div class="pos-col">
-    <span class="pos-lbl">Shares</span>
-    <span class="pos-val">{p['qty']:.0f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Entry</span>
-    <span class="pos-val">${entry:.2f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Current</span>
-    <span class="pos-val">${current:.2f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Market Value</span>
-    <span class="pos-val">${p['market_value']:,.2f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">P&amp;L</span>
-    <span class="pos-val" style="color:{pc};">{arrow} ${abs(pl):,.2f}</span>
-  </div>
-  <div class="pos-col">
-    <span class="pos-lbl">Return</span>
-    <span class="pos-val" style="color:{pc};">{arrow} {abs(plpct):.1f}%</span>
-  </div>
-</div>""", unsafe_allow_html=True)
-        with close_col:
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-            if st.button(f"✗ Close", key=f"close_{ticker_p}", use_container_width=True):
-                st.session_state["confirm_close"] = ticker_p
-                st.rerun()
-
-elif alpaca_ok:
-    st.markdown(
-        f'<div style="color:{TEXT3};font-size:13px;padding:14px 0;">'
-        f'No open positions. New bracket orders (with stop loss + take profit) will appear here after the next auto-execution.</div>',
-        unsafe_allow_html=True)
-else:
-    st.markdown(
-        f'<div style="color:{TEXT3};font-size:13px;padding:14px 0;">'
-        f'Alpaca not connected — add API keys to enable trading.</div>',
-        unsafe_allow_html=True)
+# (Positions are now inside live_alpaca() fragment above — auto-refreshes every 30s)
 
 # ── CHART ─────────────────────────────────────────────────────────────────────
 if picks_df is not None and not picks_df.empty:
