@@ -483,39 +483,130 @@ st.markdown(
     f'<div class="sec">Open Positions <span class="sec-n">{len(positions)}</span></div>',
     unsafe_allow_html=True)
 
+# Confirmation state for close
+if "confirm_close" not in st.session_state:
+    st.session_state["confirm_close"] = None
+
+if st.session_state["confirm_close"]:
+    ticker_to_close = st.session_state["confirm_close"]
+    st.markdown(
+        f'<div style="background:rgba(255,45,120,0.08);border:1px solid rgba(255,45,120,0.3);'
+        f'border-radius:8px;padding:14px 18px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">'
+        f'<span style="color:{TEXT};font-size:13px;">⚠ Close <strong style="color:{RED};">{ticker_to_close}</strong> at market price right now?</span>'
+        f'</div>',
+        unsafe_allow_html=True)
+    cc1, cc2, cc3 = st.columns([2, 1, 1])
+    with cc2:
+        if st.button("✓ Yes, close it", type="primary", use_container_width=True):
+            try:
+                from execution.alpaca import close_position
+                result = close_position(ticker_to_close)
+                if result.get("status") == "closed":
+                    st.success(f"{ticker_to_close} closed successfully.")
+                else:
+                    st.error(f"Error: {result.get('reason','Unknown error')}")
+            except Exception as e:
+                st.error(str(e))
+            st.session_state["confirm_close"] = None
+            st.rerun()
+    with cc3:
+        if st.button("✗ Cancel", use_container_width=True):
+            st.session_state["confirm_close"] = None
+            st.rerun()
+
 if positions:
     for p in positions:
-        pl    = p.get("unrealized_pl", 0)
-        plpct = p.get("unrealized_pl_pct", 0)
-        pc    = GREEN if pl >= 0 else RED
-        arrow = "▲" if pl >= 0 else "▼"
-        side  = str(p.get("side","long")).upper()
-        badge = "pos-badge-l" if side=="LONG" else "pos-badge-s"
-        st.markdown(f"""
-<div class="pos-row">
-  <div class="pos-ticker">{p['ticker']}</div>
+        pl       = p.get("unrealized_pl", 0)
+        plpct    = p.get("unrealized_pl_pct", 0)
+        pc       = GREEN if pl >= 0 else RED
+        arrow    = "▲" if pl >= 0 else "▼"
+        side     = str(p.get("side","long")).upper()
+        badge    = "pos-badge-l" if side=="LONG" else "pos-badge-s"
+        entry    = p.get("avg_entry_price", 0)
+        current  = p.get("current_price", 0)
+        sl       = p.get("stop_loss")
+        tp       = p.get("take_profit")
+        ticker_p = p["ticker"]
+
+        # How far from SL/TP
+        sl_dist = f"{abs((current - sl)/current*100):.1f}% away" if sl and current else "—"
+        tp_dist = f"{abs((tp - current)/current*100):.1f}% away" if tp and current else "—"
+
+        row_col, close_col = st.columns([6, 1])
+        with row_col:
+            st.markdown(f"""
+<div class="pos-row" style="grid-template-columns:70px 70px 1fr 1fr 1fr 1fr 1fr 1fr;">
+  <div class="pos-ticker">{ticker_p}</div>
   <div><span class="{badge}">{side}</span></div>
   <div class="pos-col">
     <span class="pos-lbl">Shares</span>
     <span class="pos-val">{p['qty']:.0f}</span>
   </div>
   <div class="pos-col">
+    <span class="pos-lbl">Entry</span>
+    <span class="pos-val">${entry:.2f}</span>
+  </div>
+  <div class="pos-col">
+    <span class="pos-lbl">Current</span>
+    <span class="pos-val">${current:.2f}</span>
+  </div>
+  <div class="pos-col">
+    <span class="pos-lbl">Stop Loss</span>
+    <span class="pos-val" style="color:{RED};">${sl:.2f} <span style="font-size:10px;color:{TEXT3};">({sl_dist})</span></span>
+  </div>
+  <div class="pos-col">
+    <span class="pos-lbl">Take Profit</span>
+    <span class="pos-val" style="color:{GREEN};">${tp:.2f} <span style="font-size:10px;color:{TEXT3};">({tp_dist})</span></span>
+  </div>
+  <div class="pos-col">
+    <span class="pos-lbl">P&amp;L</span>
+    <span class="pos-val" style="color:{pc};">{arrow} ${abs(pl):,.2f} ({abs(plpct):.1f}%)</span>
+  </div>
+</div>""" if sl and tp else f"""
+<div class="pos-row">
+  <div class="pos-ticker">{ticker_p}</div>
+  <div><span class="{badge}">{side}</span></div>
+  <div class="pos-col">
+    <span class="pos-lbl">Shares</span>
+    <span class="pos-val">{p['qty']:.0f}</span>
+  </div>
+  <div class="pos-col">
+    <span class="pos-lbl">Entry</span>
+    <span class="pos-val">${entry:.2f}</span>
+  </div>
+  <div class="pos-col">
+    <span class="pos-lbl">Current</span>
+    <span class="pos-val">${current:.2f}</span>
+  </div>
+  <div class="pos-col">
     <span class="pos-lbl">Market Value</span>
     <span class="pos-val">${p['market_value']:,.2f}</span>
   </div>
   <div class="pos-col">
-    <span class="pos-lbl">Unrealized P&amp;L</span>
+    <span class="pos-lbl">P&amp;L</span>
     <span class="pos-val" style="color:{pc};">{arrow} ${abs(pl):,.2f}</span>
   </div>
   <div class="pos-col">
     <span class="pos-lbl">Return</span>
-    <span class="pos-val" style="color:{pc};">{arrow} {abs(plpct):.2f}%</span>
+    <span class="pos-val" style="color:{pc};">{arrow} {abs(plpct):.1f}%</span>
   </div>
 </div>""", unsafe_allow_html=True)
+        with close_col:
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+            if st.button(f"✗ Close", key=f"close_{ticker_p}", use_container_width=True):
+                st.session_state["confirm_close"] = ticker_p
+                st.rerun()
+
 elif alpaca_ok:
-    st.markdown(f'<div style="color:{TEXT3};font-size:13px;padding:14px 0;">No open positions. Trades will appear here after auto-execution.</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="color:{TEXT3};font-size:13px;padding:14px 0;">'
+        f'No open positions. New bracket orders (with stop loss + take profit) will appear here after the next auto-execution.</div>',
+        unsafe_allow_html=True)
 else:
-    st.markdown(f'<div style="color:{TEXT3};font-size:13px;padding:14px 0;">Alpaca not connected — configure API keys to see live positions.</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="color:{TEXT3};font-size:13px;padding:14px 0;">'
+        f'Alpaca not connected — add API keys to enable trading.</div>',
+        unsafe_allow_html=True)
 
 # ── CHART ─────────────────────────────────────────────────────────────────────
 if picks_df is not None and not picks_df.empty:
