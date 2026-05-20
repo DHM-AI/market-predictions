@@ -131,16 +131,17 @@ hr {{ border-color:rgba(0,180,255,0.08) !important; margin:16px 0 !important; }}
     border-left:2px solid var(--acc); margin-bottom:10px;
 }}
 .card-footer {{ display:flex; justify-content:space-between; align-items:center; }}
-.card-pos {{ font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; }}
+.card-pos {{ font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; }}
+.card-pos-lbl {{ font-size:11px; font-weight:600; color:{TEXT2}; margin-bottom:3px; }}
 .auto-yes {{
-    background:rgba(0,255,136,0.1); border:1px solid rgba(0,255,136,0.3);
-    color:{GREEN}; font-size:9px; font-weight:800; letter-spacing:1px;
-    padding:4px 9px; border-radius:4px; display:inline-block;
+    background:rgba(0,255,136,0.12); border:1px solid rgba(0,255,136,0.35);
+    color:{GREEN}; font-size:11px; font-weight:800; letter-spacing:0.5px;
+    padding:6px 12px; border-radius:4px; display:inline-block;
 }}
 .auto-no {{
-    background:rgba(0,0,0,0.2); border:1px solid rgba(0,180,255,0.1);
-    color:{TEXT2}; font-size:9px; font-weight:600;
-    padding:4px 9px; border-radius:4px; display:inline-block;
+    background:rgba(0,0,0,0.2); border:1px solid rgba(0,180,255,0.12);
+    color:{TEXT2}; font-size:11px; font-weight:600;
+    padding:6px 12px; border-radius:4px; display:inline-block;
 }}
 
 /* ── Open positions ── */
@@ -335,69 +336,9 @@ def live_alpaca():
     equity       = acct.get("equity", portfolio)
     total_pl     = sum(p.get("unrealized_pl", 0) for p in positions)
     pl_color     = GREEN if total_pl >= 0 else RED
-    updated_at   = datetime.now().strftime("%H:%M:%S")
-
-    # ── Monthly goal tracker ──────────────────────────────────────────────────
-    from config import MONTHLY_TARGET_PCT, BANKROLL
-    today         = datetime.today()
-    days_in_month = monthrange(today.year, today.month)[1]
-    day_of_month  = today.day
-    trading_days  = 21                            # ~21 trading days/month
-    trading_day   = round(day_of_month / days_in_month * trading_days)
-
-    target_dollars   = BANKROLL * MONTHLY_TARGET_PCT          # e.g. $15,000
-    # Use unrealized P&L + closed trade P&L as proxy for month P&L
-    # (full tracking requires Alpaca account history — this is a good approximation)
-    month_pl_dollars = total_pl                                # improves once trades log
-    try:
-        if db_ok:
-            from db import load_trades
-            month_trades = [t for t in load_trades()
-                            if str(t.get("timestamp",""))[:7] == today.strftime("%Y-%m")]
-            # Sum realized P&L from closed trades (approximate from dollar amounts × direction)
-            # We don't have exact realized P&L stored yet — show unrealized as placeholder
-    except Exception:
-        pass
-
-    progress_pct  = (month_pl_dollars / target_dollars * 100) if target_dollars else 0
-    progress_pct  = max(-5, min(150, progress_pct))           # clamp for display
-    on_pace_target= target_dollars * (trading_day / trading_days)  # where we should be today
-    pace_diff     = month_pl_dollars - on_pace_target
-    pace_label    = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
-    pace_color    = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
-    bar_color     = GREEN if progress_pct >= 70 else AMBER if progress_pct >= 30 else RED
-    days_left     = days_in_month - day_of_month
-    needed_more   = max(0, target_dollars - month_pl_dollars)
-
-    st.markdown(f"""
-<div style="background:linear-gradient(135deg,rgba(0,180,255,0.04),rgba(0,255,136,0.03));
-            border:1px solid rgba(0,180,255,0.15);border-radius:8px;padding:14px 18px;margin-bottom:14px;">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-    <div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:{TEXT3};margin-bottom:3px;">Monthly Goal — {today.strftime('%B %Y')}</div>
-      <div style="font-size:22px;font-weight:700;font-family:JetBrains Mono,monospace;color:{bar_color};">
-        ${month_pl_dollars:+,.0f}
-        <span style="font-size:13px;font-weight:400;color:{TEXT2};">of ${target_dollars:,.0f} target (10%)</span>
-      </div>
-    </div>
-    <div style="text-align:right;">
-      <div style="font-size:12px;font-weight:600;color:{pace_color};">{pace_label}</div>
-      <div style="font-size:11px;color:{TEXT3};margin-top:3px;">Day {day_of_month}/{days_in_month} · {days_left} days left</div>
-      <div style="font-size:11px;color:{TEXT3};">Still need: ${needed_more:,.0f}</div>
-    </div>
-  </div>
-  <!-- Progress bar -->
-  <div style="height:8px;background:rgba(0,180,255,0.08);border-radius:4px;overflow:hidden;">
-    <div style="height:8px;width:{min(100,max(0,progress_pct)):.1f}%;background:{bar_color};
-                border-radius:4px;box-shadow:0 0 10px {bar_color}66;transition:width 0.5s;"></div>
-  </div>
-  <div style="display:flex;justify-content:space-between;margin-top:4px;">
-    <span style="font-size:10px;color:{TEXT3};">0%</span>
-    <span style="font-size:10px;color:{pace_color};font-weight:600;">{max(0,progress_pct):.1f}% of goal</span>
-    <span style="font-size:10px;color:{TEXT3};">10%</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+    # store for goal bar at bottom
+    st.session_state["_live_pl"]        = total_pl
+    st.session_state["_live_positions"] = len(positions)
 
     # ── Metric strip ──────────────────────────────────────────────────────────
     def mc(label, val, sub, color=TEXT3, tip=""):
@@ -426,10 +367,24 @@ def live_alpaca():
         + mc("Auto-Executing",  str(n_auto) if n_auto else "0", "Score ≥ 70",
              GREEN if n_auto else TEXT2,
              "These will be auto-traded via Alpaca bracket orders.")
-        + mc("Live Update",     updated_at, "Auto every 30s",
-             GLOW, "This strip refreshes every 30 seconds automatically.")
+        + f'<div class="metric-card" style="--mc:{GLOW}44;">'
+          f'<div class="metric-lbl">Live Update</div>'
+          f'<div class="metric-val" style="color:{GLOW};font-size:18px;" id="localtime">--:--:--</div>'
+          f'<div class="metric-sub">Your local time · auto 30s</div>'
+          f'</div>'
         + f'</div>',
         unsafe_allow_html=True)
+
+    # JS to show browser local time (not server time)
+    st.markdown("""
+<script>
+function updateTime() {
+    const el = document.getElementById('localtime');
+    if (el) el.textContent = new Date().toLocaleTimeString();
+}
+updateTime();
+setInterval(updateTime, 1000);
+</script>""", unsafe_allow_html=True)
 
     # ── Open positions ────────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -587,9 +542,20 @@ with left:
                 else:
                     acc, ab, abrd, alabel = AMBER, "rgba(255,170,0,0.10)",  "rgba(255,170,0,0.30)",  "WATCH"
 
+                # Calculate position size if not stored
+                if kelly == 0:
+                    try:
+                        from config import BANKROLL, MAX_POSITION_PCT, KELLY_FRACTION
+                        win_p = min(0.75, max(0.35, score / 100 * 0.5 + 0.25))
+                        b     = 0.07 / 0.03
+                        f     = max(0, (win_p * b - (1 - win_p)) / b)
+                        kelly = round(min(BANKROLL * f * KELLY_FRACTION, BANKROLL * MAX_POSITION_PCT) / 100) * 100
+                    except Exception:
+                        kelly = 0
+
                 tip  = tooltip_content(row)
                 rea  = plain_reason(row)
-                ks   = f"${kelly:,.0f}" if kelly else "—"
+                ks   = f"${kelly:,.0f}" if kelly else "Calculating..."
 
                 card = f"""
 <div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">
@@ -609,10 +575,10 @@ with left:
   <div class="card-reason">{rea}</div>
   <div class="card-footer">
     <div>
-      <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:{TEXT3};margin-bottom:2px;">Position Size</div>
+      <div class="card-pos-lbl">Position Size</div>
       <div class="card-pos" style="color:{acc};">{ks}</div>
     </div>
-    {"<span class='auto-yes'>⚡ AUTO-EXECUTING</span>" if auto else "<span class='auto-no'>Manual only (score &lt; 70)</span>"}
+    {"<span class='auto-yes'>⚡ AUTO-EXECUTING</span>" if auto else "<span class='auto-no'>Manual · score &lt; 70</span>"}
   </div>
 </div>"""
                 with cols[ci]:
@@ -722,6 +688,66 @@ else:
         f'padding:24px;text-align:center;color:{TEXT3};font-size:12px;">'
         f'No trade history yet. Auto-executed trades will appear here.</div>',
         unsafe_allow_html=True)
+
+# ── MONTHLY GOAL BAR (bottom of page) ─────────────────────────────────────────
+from calendar import monthrange
+from config import MONTHLY_TARGET_PCT, BANKROLL
+
+today_g       = datetime.today()
+days_in_month = monthrange(today_g.year, today_g.month)[1]
+day_of_month  = today_g.day
+days_left     = days_in_month - day_of_month
+trading_days  = 21
+trading_day   = round(day_of_month / days_in_month * trading_days)
+target_dollars= BANKROLL * MONTHLY_TARGET_PCT
+month_pl      = st.session_state.get("_live_pl", 0)
+progress_pct  = max(0, min(100, (month_pl / target_dollars * 100) if target_dollars else 0))
+on_pace       = target_dollars * (trading_day / trading_days)
+pace_diff     = month_pl - on_pace
+pace_color    = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
+bar_color     = GREEN if progress_pct >= 70 else AMBER if progress_pct >= 30 else RED
+pace_lbl      = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
+
+st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+st.markdown(f"""
+<div style="background:linear-gradient(135deg,rgba(0,255,136,0.04),rgba(0,180,255,0.03));
+     border:1px solid rgba(0,255,136,0.15);border-radius:10px;padding:18px 22px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:{TEXT2};margin-bottom:5px;">
+        Monthly Goal — {today_g.strftime('%B %Y')}
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;color:{bar_color};">
+        ${month_pl:+,.0f}
+        <span style="font-size:14px;font-weight:400;color:{TEXT2};">&nbsp;of&nbsp; ${target_dollars:,.0f} &nbsp;(10%)</span>
+      </div>
+    </div>
+    <div style="text-align:right;display:flex;gap:32px;">
+      <div>
+        <div style="font-size:10px;color:{TEXT3};font-weight:600;letter-spacing:1px;text-transform:uppercase;">Pace</div>
+        <div style="font-size:14px;font-weight:700;color:{pace_color};margin-top:3px;">{pace_lbl}</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:{TEXT3};font-weight:600;letter-spacing:1px;text-transform:uppercase;">Days Left</div>
+        <div style="font-size:14px;font-weight:700;color:{TEXT};margin-top:3px;">{days_left} days</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:{TEXT3};font-weight:600;letter-spacing:1px;text-transform:uppercase;">Still Need</div>
+        <div style="font-size:14px;font-weight:700;color:{TEXT};margin-top:3px;">${max(0,target_dollars - month_pl):,.0f}</div>
+      </div>
+    </div>
+  </div>
+  <div style="height:10px;background:rgba(0,180,255,0.08);border-radius:5px;overflow:hidden;">
+    <div style="height:10px;width:{progress_pct:.1f}%;background:{bar_color};border-radius:5px;
+         box-shadow:0 0 12px {bar_color}88;transition:width 0.6s ease;"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:6px;">
+    <span style="font-size:11px;color:{TEXT3};">$0</span>
+    <span style="font-size:12px;font-weight:700;color:{bar_color};">{progress_pct:.1f}% complete</span>
+    <span style="font-size:11px;color:{TEXT3};">${target_dollars:,.0f}</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ── Smart tooltip positioning ──────────────────────────────────────────────────
 st.markdown("""
