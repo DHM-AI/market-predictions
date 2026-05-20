@@ -1,41 +1,101 @@
+"""
+Technical signal computation — uses the `ta` library (no numba/llvmlite dependency).
+"""
 import pandas as pd
 import numpy as np
-import pandas_ta as ta
-from config import BB_SQUEEZE_PERCENTILE, ATR_COMPRESSION_RATIO, VOLUME_SURGE_RATIO, RSI_OVERBOUGHT, RSI_OVERSOLD
+from config import (BB_SQUEEZE_PERCENTILE, ATR_COMPRESSION_RATIO,
+                    VOLUME_SURGE_RATIO, RSI_OVERBOUGHT, RSI_OVERSOLD)
+
+try:
+    from ta.momentum import RSIIndicator
+    from ta.volatility import BollingerBands, AverageTrueRange
+    from ta.trend import EMAIndicator
+    _TA_AVAILABLE = True
+except ImportError:
+    _TA_AVAILABLE = False
 
 
 def _require_min_rows(df: pd.DataFrame, n: int) -> bool:
     return len(df) >= n
 
 
+# ── Pure-pandas fallbacks ─────────────────────────────────────────────────────
+
+def _ema_pandas(series: pd.Series, period: int) -> pd.Series:
+    return series.ewm(span=period, adjust=False).mean()
+
+
+def _rsi_pandas(series: pd.Series, period: int = 14) -> pd.Series:
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
+def _bollinger_pandas(series: pd.Series, window: int = 20) -> tuple:
+    mid = series.rolling(window).mean()
+    std = series.rolling(window).std()
+    upper = mid + 2 * std
+    lower = mid - 2 * std
+    width = (upper - lower) / mid.replace(0, np.nan)
+    return upper, mid, lower, width
+
+
+def _atr_pandas(high: pd.Series, low: pd.Series, close: pd.Series,
+                period: int = 14) -> pd.Series:
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(com=period - 1, min_periods=period).mean()
+
+
+# ── Signal functions ──────────────────────────────────────────────────────────
+
 def bb_squeeze(df: pd.DataFrame, window: int = 50) -> dict:
     if not _require_min_rows(df, window + 20):
         return {"triggered": False, "width_percentile": 50.0, "width": None}
     try:
-        bbands = ta.bbands(df["Close"], length=20)
-        if bbands is None or bbands.empty:
-            return {"triggered": False, "width_percentile": 50.0, "width": None}
-        upper_col = [c for c in bbands.columns if "BBU" in c][0]
-        lower_col = [c for c in bbands.columns if "BBL" in c][0]
-        mid_col = [c for c in bbands.columns if "BBM" in c][0]
-        width = (bbands[upper_col] - bbands[lower_col]) / bbands[mid_col]
-        width = width.dropna()
+        close = df["Close"]
+        if _TA_AVAILABLE:
+            bb = BollingerBands(close, window=20, window_dev=2)
+            upper = bb.bollinger_hband()
+            mid   = bb.bollinger_mavg()
+            lower = bb.bollinger_lband()
+            width = ((upper - lower) / mid.replace(0, np.nan)).dropna()
+        else:
+            _, _, _, width = _bollinger_pandas(close)
+            width = width.dropna()
+
         if len(width) < window:
             return {"triggered": False, "width_percentile": 50.0, "width": None}
-        current = width.iloc[-1]
-        rolling_window = width.iloc[-window:]
-        pct = float(pd.Series(rolling_window).rank(pct=True).iloc[-1] * 100)
-        triggered = pct <= BB_SQUEEZE_PERCENTILE
-        return {"triggered": triggered, "width_percentile": round(pct, 1), "width": round(float(current), 4)}
+
+        current = float(width.iloc[-1])
+        rolling = width.iloc[-window:]
+        pct = float((rolling <= current).mean() * 100)
+        return {"triggered": pct <= BB_SQUEEZE_PERCENTILE,
+                "width_percentile": round(pct, 1),
+                "width": round(current, 4)}
     except Exception:
         return {"triggered": False, "width_percentile": 50.0, "width": None}
 
 
-def atr_compression(df: pd.DataFrame, atr_period: int = 14, avg_period: int = 50) -> dict:
+def atr_compression(df: pd.DataFrame, atr_period: int = 14,
+                    avg_period: int = 50) -> dict:
     if not _require_min_rows(df, avg_period + atr_period):
         return {"triggered": False, "ratio": 1.0}
     try:
-        atr = ta.atr(df["High"], df["Low"], df["Close"], length=atr_period).dropna()
+        if _TA_AVAILABLE:
+            atr = AverageTrueRange(df["High"], df["Low"], df["Close"],
+                                   window=atr_period).average_true_range().dropna()
+        else:
+            atr = _atr_pandas(df["High"], df["Low"], df["Close"],
+                              period=atr_period).dropna()
+
         if len(atr) < avg_period:
             return {"triggered": False, "ratio": 1.0}
         current_atr = float(atr.iloc[-1])
@@ -53,8 +113,6 @@ def volume_surge(df: pd.DataFrame, avg_period: int = 20) -> dict:
         return {"triggered": False, "ratio": 1.0}
     try:
         vol = df["Volume"].dropna()
-        if len(vol) < avg_period + 1:
-            return {"triggered": False, "ratio": 1.0}
         today_vol = float(vol.iloc[-1])
         avg_vol = float(vol.iloc[-(avg_period + 1):-1].mean())
         if avg_vol == 0:
@@ -69,7 +127,11 @@ def rsi_signal(df: pd.DataFrame, period: int = 14) -> dict:
     if not _require_min_rows(df, period + 5):
         return {"value": 50.0, "extreme": False, "side": "neutral"}
     try:
-        rsi = ta.rsi(df["Close"], length=period).dropna()
+        if _TA_AVAILABLE:
+            rsi = RSIIndicator(df["Close"], window=period).rsi().dropna()
+        else:
+            rsi = _rsi_pandas(df["Close"], period=period).dropna()
+
         if rsi.empty:
             return {"value": 50.0, "extreme": False, "side": "neutral"}
         val = float(rsi.iloc[-1])
@@ -86,12 +148,16 @@ def price_vs_ema(df: pd.DataFrame, period: int = 50) -> dict:
     if not _require_min_rows(df, period):
         return {"ema50_pct": 0.0}
     try:
-        ema = ta.ema(df["Close"], length=period).dropna()
+        if _TA_AVAILABLE:
+            ema = EMAIndicator(df["Close"], window=period).ema_indicator().dropna()
+        else:
+            ema = _ema_pandas(df["Close"], period).dropna()
+
         if ema.empty:
             return {"ema50_pct": 0.0}
         ema_val = float(ema.iloc[-1])
-        price = float(df["Close"].iloc[-1])
-        pct = (price - ema_val) / ema_val * 100
+        price   = float(df["Close"].iloc[-1])
+        pct = (price - ema_val) / ema_val * 100 if ema_val != 0 else 0.0
         return {"ema50_pct": round(pct, 2)}
     except Exception:
         return {"ema50_pct": 0.0}
@@ -99,7 +165,7 @@ def price_vs_ema(df: pd.DataFrame, period: int = 50) -> dict:
 
 def compute_all(df: pd.DataFrame) -> dict:
     return {
-        "bb": bb_squeeze(df),
+        "bb":  bb_squeeze(df),
         "atr": atr_compression(df),
         "vol": volume_surge(df),
         "rsi": rsi_signal(df),
@@ -108,22 +174,22 @@ def compute_all(df: pd.DataFrame) -> dict:
 
 
 def compute_feature_row(df: pd.DataFrame) -> dict:
-    """Return a flat feature dict suitable for ML training/inference."""
-    bb = bb_squeeze(df)
+    """Flat feature dict for ML training/inference."""
+    bb  = bb_squeeze(df)
     atr = atr_compression(df)
     vol = volume_surge(df)
     rsi = rsi_signal(df)
     ema = price_vs_ema(df)
     return {
-        "bb_width_pct": bb["width_percentile"],
-        "bb_squeeze": int(bb["triggered"]),
-        "atr_ratio": atr["ratio"],
+        "bb_width_pct":    bb["width_percentile"],
+        "bb_squeeze":      int(bb["triggered"]),
+        "atr_ratio":       atr["ratio"],
         "atr_compression": int(atr["triggered"]),
-        "volume_ratio": vol["ratio"],
-        "volume_surge": int(vol["triggered"]),
-        "rsi_value": rsi["value"],
-        "rsi_extreme": int(rsi["extreme"]),
-        "rsi_bull": int(rsi["side"] == "bull"),
-        "rsi_bear": int(rsi["side"] == "bear"),
-        "ema50_pct": ema["ema50_pct"],
+        "volume_ratio":    vol["ratio"],
+        "volume_surge":    int(vol["triggered"]),
+        "rsi_value":       rsi["value"],
+        "rsi_extreme":     int(rsi["extreme"]),
+        "rsi_bull":        int(rsi["side"] == "bull"),
+        "rsi_bear":        int(rsi["side"] == "bear"),
+        "ema50_pct":       ema["ema50_pct"],
     }

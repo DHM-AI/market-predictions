@@ -1,7 +1,9 @@
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.subplots as sp
-import pandas_ta as ta
+from ta.volatility import BollingerBands as TaBB, AverageTrueRange as TaATR
+from ta.momentum import RSIIndicator as TaRSI
+from signals.technicals import _bollinger_pandas, _atr_pandas, _rsi_pandas
 from ui_style import inject_css, section_header, score_pill, direction_badge, live_badge
 
 st.set_page_config(page_title="Ticker Deep Dive", page_icon="📊", layout="wide")
@@ -107,9 +109,17 @@ for i, (name, triggered, detail) in enumerate(signals_data):
 st.divider()
 section_header("CHARTS")
 
-rsi_s = ta.rsi(df["Close"], length=14)
-atr_s = ta.atr(df["High"], df["Low"], df["Close"], length=14)
-bbands = ta.bbands(df["Close"], length=20)
+try:
+    rsi_s = TaRSI(df["Close"], window=14).rsi()
+    atr_s = TaATR(df["High"], df["Low"], df["Close"], window=14).average_true_range()
+    _bb   = TaBB(df["Close"], window=20, window_dev=2)
+    bb_upper = _bb.bollinger_hband()
+    bb_lower = _bb.bollinger_lband()
+except Exception:
+    rsi_s = _rsi_pandas(df["Close"])
+    atr_s = _atr_pandas(df["High"], df["Low"], df["Close"])
+    _, _, _, _ = _bollinger_pandas(df["Close"])
+    bb_upper = bb_lower = None
 
 fig = sp.make_subplots(rows=3, cols=1, shared_xaxes=True,
                        row_heights=[0.55, 0.25, 0.20], vertical_spacing=0.03)
@@ -119,16 +129,12 @@ fig.add_trace(go.Candlestick(x=df.index, open=df["Open"], high=df["High"],
     increasing=dict(line=dict(color="#00ff88"), fillcolor="#00ff8833"),
     decreasing=dict(line=dict(color="#ef4444"), fillcolor="#ef444433")), row=1, col=1)
 
-if bbands is not None and not bbands.empty:
-    u = [c for c in bbands.columns if "BBU" in c]
-    l = [c for c in bbands.columns if "BBL" in c]
-    m = [c for c in bbands.columns if "BBM" in c]
-    if u and l and m:
-        fig.add_trace(go.Scatter(x=df.index, y=bbands[u[0]], line=dict(color="#1e1e1e", width=1),
-                                  name="BB Upper", showlegend=False), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=bbands[l[0]], line=dict(color="#1e1e1e", width=1),
-                                  name="BB Lower", fill="tonexty",
-                                  fillcolor="rgba(255,255,255,0.02)", showlegend=False), row=1, col=1)
+if bb_upper is not None and bb_lower is not None:
+    fig.add_trace(go.Scatter(x=df.index, y=bb_upper, line=dict(color="#1e1e1e", width=1),
+                              name="BB Upper", showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=bb_lower, line=dict(color="#1e1e1e", width=1),
+                              name="BB Lower", fill="tonexty",
+                              fillcolor="rgba(255,255,255,0.02)", showlegend=False), row=1, col=1)
 
 if rsi_s is not None:
     fig.add_trace(go.Scatter(x=df.index, y=rsi_s, line=dict(color="#a78bfa", width=1.5),

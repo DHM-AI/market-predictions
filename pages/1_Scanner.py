@@ -316,11 +316,11 @@ if picks_df is not None and not picks_df.empty:
 
     if selected:
         from data.fetcher import get_ohlcv
-        import pandas_ta as ta
+        from ta.volatility import BollingerBands as BB
 
         df = get_ohlcv(selected, period="6mo")
         if not df.empty:
-            bbands = ta.bbands(df["Close"], length=20)
+            _bb = BB(df["Close"], window=20, window_dev=2)
             fig = go.Figure()
             fig.add_trace(go.Candlestick(
                 x=df.index, open=df["Open"], high=df["High"],
@@ -328,17 +328,20 @@ if picks_df is not None and not picks_df.empty:
                 increasing=dict(line=dict(color="#00C805"), fillcolor="#00280522"),
                 decreasing=dict(line=dict(color="#FF3333"), fillcolor="#28000522"),
             ))
-            if bbands is not None and not bbands.empty:
-                u = [c for c in bbands.columns if "BBU" in c]
-                l = [c for c in bbands.columns if "BBL" in c]
-                if u and l:
-                    fig.add_trace(go.Scatter(x=df.index, y=bbands[u[0]],
-                        line=dict(color="#F07D2A", width=1, dash="dot"),
-                        name="BB Upper", showlegend=False))
-                    fig.add_trace(go.Scatter(x=df.index, y=bbands[l[0]],
-                        line=dict(color="#F07D2A", width=1, dash="dot"),
-                        fill="tonexty", fillcolor="rgba(240,125,42,0.04)",
-                        name="BB Lower", showlegend=False))
+            try:
+                _upper = _bb.bollinger_hband()
+                _lower = _bb.bollinger_lband()
+                u = [_upper]; l = [_lower]
+            except Exception:
+                u = []; l = []
+            if u and l:
+                fig.add_trace(go.Scatter(x=df.index, y=u[0],
+                    line=dict(color="#F07D2A", width=1, dash="dot"),
+                    name="BB Upper", showlegend=False))
+                fig.add_trace(go.Scatter(x=df.index, y=l[0],
+                    line=dict(color="#F07D2A", width=1, dash="dot"),
+                    fill="tonexty", fillcolor="rgba(240,125,42,0.04)",
+                    name="BB Lower", showlegend=False))
 
             fig.update_layout(
                 xaxis_rangeslider_visible=False, height=360,
