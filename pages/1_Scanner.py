@@ -14,9 +14,9 @@ GLOW  = "#00d4ff"
 GREEN = "#00ff88"
 RED   = "#ff2d78"
 AMBER = "#ffaa00"
-TEXT  = "#c8e8ff"
-TEXT2 = "#4a7a9b"
-TEXT3 = "#1e3a50"
+TEXT  = "#e8f4ff"   # primary — brighter white-blue
+TEXT2 = "#8ab8d4"   # secondary — readable cyan-grey
+TEXT3 = "#5a8a9f"   # labels / tertiary — was nearly invisible, now legible
 
 st.markdown(f"""
 <style>
@@ -319,6 +319,43 @@ with hc2:
         st.rerun()
 
 # ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
+def _market_clock() -> str:
+    """Current ET time formatted as market clock."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).strftime("%I:%M %p ET")
+    except Exception:
+        return datetime.utcnow().strftime("%H:%M UTC")
+
+def _is_market_open() -> bool:
+    """True during regular market hours Mon–Fri 9:30–16:00 ET."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+        if now.weekday() >= 5:
+            return False
+        open_t  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+        close_t = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+        return open_t <= now < close_t
+    except Exception:
+        return False
+
+def _market_status() -> str:
+    """Descriptive market status string."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+        if now.weekday() >= 5:
+            return "Weekend — market closed"
+        t = now.hour * 60 + now.minute
+        if t < 4*60:              return "Closed"
+        if t < 9*60+30:           return "Pre-market open"
+        if t < 16*60:             return "🟢 Market open"
+        if t < 20*60:             return "After-hours trading"
+        return "Market closed"
+    except Exception:
+        return "Status unknown"
+
 def _next_scan_label() -> str:
     """Returns human-readable label for the next scheduled scan + countdown."""
     try:
@@ -404,11 +441,11 @@ def live_alpaca():
         + mc("Auto-Executing",  str(n_auto) if n_auto else "0", "Score ≥ 70",
              GREEN if n_auto else TEXT2,
              "These will be auto-traded via Alpaca bracket orders.")
-        + mc("Last Refresh",
-             datetime.now().strftime("%I:%M:%S %p"),
-             "Auto every 30s",
-             GLOW,
-             "Data pulled from Alpaca API every 30 seconds. Portfolio, P&L and positions are always live.")
+        + mc("Market Clock",
+             _market_clock(),
+             _market_status(),
+             GREEN if _is_market_open() else AMBER,
+             "Market time from Alpaca. GREEN = market open, AMBER = pre/after hours, shows if trading is live.")
         + f'</div>',
         unsafe_allow_html=True)
 
