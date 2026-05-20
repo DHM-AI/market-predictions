@@ -1,75 +1,90 @@
 import streamlit as st
-from ui_style import inject_css, live_badge, agent_card, section_header
+import os
+from ui_style import inject_css, bbg_header, bbg_page_title, status_bar
+from datetime import datetime
+
+st.set_page_config(page_title="MKTPRED TERMINAL", page_icon="📡", layout="wide")
+inject_css()
+
+bbg_page_title("MKTPRED TERMINAL", "HOME GO")
+st.markdown('<p style="color:#555;font-size:10px;letter-spacing:1px;margin-top:2px;margin-bottom:16px;">AI-POWERED MARKET PREDICTION SYSTEM  ·  STOCKS &amp; FUTURES  ·  XGBOOST + CLAUDE</p>', unsafe_allow_html=True)
+
+# ── Navigation ─────────────────────────────────────────────────────────────────
+bbg_header("FUNCTION KEYS")
+c1, c2, c3, c4 = st.columns(4)
+c1.page_link("pages/1_Scanner.py",     label="F1  SCAN", use_container_width=True)
+c2.page_link("pages/2_Ticker_Dive.py", label="F2  TICKER DV", use_container_width=True)
+c3.page_link("pages/3_Track_Record.py",label="F3  RECORD", use_container_width=True)
+c4.page_link("pages/4_Positions.py",   label="F4  POSITIONS", use_container_width=True)
+
+st.markdown("<hr/>", unsafe_allow_html=True)
+
+# ── Agent pipeline status ──────────────────────────────────────────────────────
+bbg_header("AGENT PIPELINE STATUS")
+
 from model.predictor import model_available
 import db
 
-st.set_page_config(
-    page_title="AI Market Scanner",
-    page_icon="📡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-inject_css()
-
-# ── Header ─────────────────────────────────────────────────────────────────────
-st.markdown(
-    f'<h2 style="color:#e8e8e8;font-weight:700;letter-spacing:-0.5px;">'
-    f'AI Market Scanner{live_badge()}</h2>'
-    f'<p style="color:#444;font-size:13px;margin-top:-8px;">Prediction Markets · Stocks & Futures · Powered by XGBoost + Claude</p>',
-    unsafe_allow_html=True
-)
-
-st.divider()
-
-# ── Pipeline status cards ──────────────────────────────────────────────────────
-section_header("AGENT PIPELINE")
-
-c1, c2 = st.columns(2)
-with c1:
-    model_status = "running" if model_available() else "warning"
-    model_label  = "XGBoost Model ✓" if model_available() else "No model — train first"
-    st.markdown(agent_card("Scan + Predict Agent", model_label,
-                           "Active" if model_available() else "⚠", model_status),
-                unsafe_allow_html=True)
-    st.markdown(agent_card("Research Agent",
-                           "Reddit · RSS · Alpha Vantage · yfinance",
-                           "5 sources", "running"),
-                unsafe_allow_html=True)
-
-with c2:
-    db_status = "running" if db.db_available() else "warning"
-    db_label  = "Supabase connected" if db.db_available() else "No DB — add credentials"
-    st.markdown(agent_card("Risk Agent", f"Kelly Criterion · $50k bankroll",
-                           "Active", "running"), unsafe_allow_html=True)
-    st.markdown(agent_card("Learning Agent", "Weekly post-mortem · Auto-retrain",
-                           "Sunday", "idle"), unsafe_allow_html=True)
-
-st.divider()
-
-# ── Quick nav ──────────────────────────────────────────────────────────────────
-section_header("NAVIGATION")
-col1, col2, col3, col4 = st.columns(4)
-col1.page_link("pages/1_Scanner.py",    label="🔍  Scanner",         use_container_width=True)
-col2.page_link("pages/2_Ticker_Dive.py", label="📊  Ticker Deep Dive", use_container_width=True)
-col3.page_link("pages/3_Track_Record.py", label="📋  Track Record",    use_container_width=True)
-col4.page_link("pages/4_Positions.py",  label="💼  Positions",        use_container_width=True)
-
-st.divider()
-
-# ── Setup checklist ────────────────────────────────────────────────────────────
-section_header("SYSTEM STATUS")
-checks = [
-    ("XGBoost model trained",     model_available()),
-    ("Supabase connected",        db.db_available()),
-    ("Anthropic API configured",  bool(__import__('os').environ.get('ANTHROPIC_API_KEY'))),
-    ("Alpaca configured",         bool(__import__('os').environ.get('ALPACA_API_KEY'))),
-    ("Alpha Vantage configured",  bool(__import__('os').environ.get('ALPHA_VANTAGE_KEY'))),
+agents = [
+    ("1 · SCAN",     "yfinance · 509 tickers · S&P 500 + futures",                True),
+    ("2 · RESEARCH", "Reddit · RSS · Alpha Vantage · yfinance",                   True),
+    ("3 · PREDICT",  "XGBoost" + (" ✓ MODEL LOADED" if model_available() else " ○ NO MODEL"),  True),
+    ("4 · RISK",     "Kelly Criterion · $50,000 bankroll",                         True),
+    ("5 · LEARN",    "Weekly post-mortem · auto-retrain · Supabase logging",       True),
 ]
-for label, ok in checks:
-    icon  = "🟢" if ok else "🔴"
-    color = "#00ff88" if ok else "#ef4444"
+
+for name, desc, active in agents:
+    dot   = "●" if active else "○"
+    color = "#F07D2A" if active else "#222"
     st.markdown(
-        f'<div style="padding:4px 0;font-size:13px;">'
-        f'{icon} <span style="color:{color};">{label}</span></div>',
+        f'<div style="border-bottom:1px solid #0a0a0a;padding:8px 12px;'
+        f'display:flex;align-items:center;gap:10px;">'
+        f'<span style="color:{color};font-size:10px;">{dot}</span>'
+        f'<span style="color:#F07D2A;font-size:11px;font-weight:700;width:120px;">{name}</span>'
+        f'<span style="color:#444;font-size:10px;">{desc}</span>'
+        f'</div>',
         unsafe_allow_html=True
     )
+
+st.markdown("<hr/>", unsafe_allow_html=True)
+
+# ── System status ──────────────────────────────────────────────────────────────
+bbg_header("SYSTEM CHECKLIST")
+
+checks = [
+    ("XGBOOST MODEL TRAINED",  model_available()),
+    ("SUPABASE CONNECTED",     db.db_available()),
+    ("ANTHROPIC API",          bool(os.environ.get("ANTHROPIC_API_KEY"))),
+    ("ALPACA CONFIGURED",      bool(os.environ.get("ALPACA_API_KEY"))),
+    ("ALPHA VANTAGE",          bool(os.environ.get("ALPHA_VANTAGE_KEY"))),
+    ("GITHUB ACTIONS",         True),  # always true once deployed
+]
+
+cols = st.columns(3)
+for i, (label, ok) in enumerate(checks):
+    dot   = "● " if ok else "○ "
+    color = "#F07D2A" if ok else "#333"
+    status = "ACTIVE" if ok else "NOT SET"
+    cols[i % 3].markdown(
+        f'<div style="padding:10px;border:1px solid #111;margin:3px 0;">'
+        f'<div style="color:{color};font-size:9px;letter-spacing:1px;">{dot}{label}</div>'
+        f'<div style="color:#333;font-size:9px;margin-top:2px;">{status}</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
+st.markdown("<hr/>", unsafe_allow_html=True)
+
+# ── Getting started ────────────────────────────────────────────────────────────
+bbg_header("QUICK START")
+st.markdown("""
+<div style="font-size:11px;color:#555;line-height:2;padding:10px 0;">
+<span style="color:#F07D2A;">1)</span> Train model &nbsp;&nbsp;&nbsp;→ &nbsp;<span style="color:#ccc;">python -m model.trainer</span><br>
+<span style="color:#F07D2A;">2)</span> Run scan &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ &nbsp;<span style="color:#ccc;">python agent.py --no-email --no-trade</span><br>
+<span style="color:#F07D2A;">3)</span> Open dashboard → &nbsp;<span style="color:#ccc;">streamlit run app.py</span><br>
+<span style="color:#F07D2A;">4)</span> Daily auto-scan → &nbsp;<span style="color:#ccc;">GitHub Actions · 08:00 ET weekdays</span><br>
+<span style="color:#F07D2A;">5)</span> Paper trades &nbsp;&nbsp;→ &nbsp;<span style="color:#ccc;">Alpaca paper-api · score ≥ 70</span>
+</div>
+""", unsafe_allow_html=True)
+
+status_bar(f"MKTPRED TERMINAL  ·  BUILD 2.0  ·  {datetime.now().strftime('%d %b %Y %H:%M')}  ·  PAPER TRADING MODE")

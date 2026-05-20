@@ -2,337 +2,228 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-from ui_style import inject_css, live_badge, section_header, direction_badge, score_pill
+from ui_style import (inject_css, bbg_header, bbg_page_title,
+                      score_chip, direction_html, signal_tags, status_bar)
 
-st.set_page_config(page_title="AI Market Scanner", page_icon="📡", layout="wide")
+st.set_page_config(page_title="MKTPRED | SCAN", page_icon="📡", layout="wide")
 inject_css()
 
-# ── Extra layout CSS ───────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-.pipeline-step {
-    display: flex;
-    align-items: center;
-    padding: 10px 14px;
-    border-bottom: 1px solid #1a1a1a;
-    gap: 12px;
-}
-.pipeline-dot {
-    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-}
-.pipeline-dot.active  { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
-.pipeline-dot.pending { background: #1e1e1e; border: 1px solid #333; }
-.pipeline-dot.warn    { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+bbg_page_title("MARKET SCAN", "SCAN GO")
+st.markdown('<p style="color:#555;font-size:10px;letter-spacing:1px;margin-top:2px;">S&P 500 + FUTURES  ·  5-AGENT PIPELINE  ·  5-10% MOVE DETECTION</p>', unsafe_allow_html=True)
 
-.pipeline-label { color: #e8e8e8; font-size: 13px; flex: 1; }
-.pipeline-sub   { color: #444; font-size: 11px; }
-.pipeline-count {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 18px; font-weight: 700; color: #00ff88; min-width: 48px; text-align: right;
-}
-.pipeline-count.dim { color: #333; }
+# ── Run button ─────────────────────────────────────────────────────────────────
+c_btn, c_model, c_time = st.columns([1, 2, 1])
+with c_btn:
+    run_clicked = st.button("F8  ▶  RUN SCAN", type="primary", use_container_width=True)
+with c_model:
+    from model.predictor import model_available
+    dot   = "●" if model_available() else "○"
+    color = "#F07D2A" if model_available() else "#555"
+    label = "XGBOOST MODEL LOADED" if model_available() else "NO MODEL — RULE-BASED FALLBACK"
+    st.markdown(f'<span style="color:{color};font-size:10px;letter-spacing:1px;">{dot} {label}</span>', unsafe_allow_html=True)
+with c_time:
+    st.markdown(f'<span style="color:#333;font-size:10px;float:right;">{datetime.now().strftime("%H:%M:%S")}</span>', unsafe_allow_html=True)
 
-.pipeline-bar-wrap { flex: 1; height: 4px; background: #1e1e1e; border-radius: 2px; max-width: 120px; }
-.pipeline-bar-fill { height: 4px; background: #00ff88; border-radius: 2px; transition: width 0.4s; }
+st.markdown("<hr/>", unsafe_allow_html=True)
 
-.qualified-box {
-    background: #0a1f0f;
-    border: 1px solid #00ff88;
-    border-radius: 6px;
-    padding: 16px 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 4px;
-}
-.qualified-label { color: #00ff88; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
-.qualified-count { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: #00ff88; }
+# ══ SESSION STATE ══════════════════════════════════════════════════════════════
+for k, v in [("pipeline_counts", {}), ("last_picks", None),
+             ("ticker_tape", []), ("scan_time", "")]:
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-.ticker-list { overflow-y: auto; max-height: 580px; }
-.ticker-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 7px 10px;
-    border-bottom: 1px solid #151515;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    cursor: pointer;
-}
-.ticker-item:hover { background: #161616; }
-.t-sym   { color: #e8e8e8; font-weight: 600; width: 60px; }
-.t-price { color: #888; width: 80px; text-align: right; }
-.t-chg   { width: 64px; text-align: right; }
-.t-up    { color: #00ff88; }
-.t-dn    { color: #ef4444; }
+# ══ TWO-COLUMN LAYOUT ══════════════════════════════════════════════════════════
+left_col, right_col = st.columns([1, 2], gap="small")
 
-.agent-panel {
-    background: #161616;
-    border: 1px solid #1e1e1e;
-    border-radius: 6px;
-    overflow: hidden;
-    margin-bottom: 10px;
-}
-.agent-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    border-bottom: 1px solid #1e1e1e;
-    background: #111;
-}
-.agent-title  { color: #e8e8e8; font-size: 13px; font-weight: 600; }
-.agent-status { color: #00ff88; font-size: 11px; }
-.agent-num    { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; color: #00ff88; }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  STATE
-# ══════════════════════════════════════════════════════════════════
-if "scan_state" not in st.session_state:
-    st.session_state["scan_state"] = "idle"   # idle | running | done
-if "pipeline_counts" not in st.session_state:
-    st.session_state["pipeline_counts"] = {}
-if "last_picks" not in st.session_state:
-    st.session_state["last_picks"] = None
-if "ticker_tape" not in st.session_state:
-    st.session_state["ticker_tape"] = []
-
-
-# ══════════════════════════════════════════════════════════════════
-#  HEADER
-# ══════════════════════════════════════════════════════════════════
-header_col, btn_col = st.columns([3, 1])
-with header_col:
-    st.markdown(
-        f'<h2 style="color:#e8e8e8;font-weight:700;margin-bottom:0;">AI Market Scanner{live_badge()}</h2>'
-        f'<p style="color:#444;font-size:12px;margin:0;">S&P 500 + Futures · 5-Agent Pipeline · 5-10% Move Detection</p>',
-        unsafe_allow_html=True
-    )
-with btn_col:
-    run_clicked = st.button("▶  RUN SCAN", type="primary", use_container_width=True)
-
-
-st.divider()
-
-
-# ══════════════════════════════════════════════════════════════════
-#  LAYOUT: LEFT ticker tape  |  RIGHT pipeline panel
-# ══════════════════════════════════════════════════════════════════
-left_col, right_col = st.columns([1, 2], gap="medium")
-
-
-# ── LEFT: Ticker tape ──────────────────────────────────────────────
+# ── LEFT: Ticker tape ──────────────────────────────────────────────────────────
 with left_col:
-    st.markdown('<div style="color:#444;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Active Universe</div>', unsafe_allow_html=True)
+    bbg_header("ACTIVE UNIVERSE", "SORTED BY MOVE")
+    tape_ph = st.empty()
 
-    tape_placeholder = st.empty()
-
-    def render_ticker_tape(tickers_data: list[dict]):
-        if not tickers_data:
-            tape_placeholder.markdown(
-                '<div style="color:#333;padding:40px 0;text-align:center;font-size:12px;">Run a scan to populate</div>',
+    def render_tape(data: list):
+        if not data:
+            tape_ph.markdown(
+                '<div style="color:#222;padding:30px 10px;font-size:10px;'
+                'letter-spacing:1px;">NO DATA — RUN SCAN</div>',
                 unsafe_allow_html=True
             )
             return
         rows = ""
-        for t in tickers_data[:40]:
-            chg = t.get("chg_pct", 0)
-            cls = "t-up" if chg >= 0 else "t-dn"
-            arrow = "▲" if chg >= 0 else "▼"
-            price_str = f"${t.get('price', 0):,.2f}" if t.get("price") else "—"
-            rows += (f'<div class="ticker-item">'
-                     f'<span class="t-sym">{t["ticker"]}</span>'
-                     f'<span class="t-price">{price_str}</span>'
-                     f'<span class="t-chg {cls}">{arrow}{abs(chg):.1f}%</span>'
+        for t in data[:45]:
+            chg  = t.get("chg_pct", 0)
+            cls  = "tape-up" if chg >= 0 else "tape-dn"
+            sign = "+" if chg >= 0 else ""
+            px   = f'${t["price"]:>8,.2f}' if t.get("price") else "      —"
+            rows += (f'<div class="tape-row">'
+                     f'<span class="tape-sym">{t["ticker"]:<6}</span>'
+                     f'<span class="tape-price">{px}</span>'
+                     f'<span class="{cls}">{sign}{chg:.1f}%</span>'
                      f'</div>')
-        tape_placeholder.markdown(
-            f'<div class="agent-panel"><div class="ticker-list">{rows}</div></div>',
+        tape_ph.markdown(
+            f'<div style="border:1px solid #1a1a1a;overflow-y:auto;max-height:580px;">{rows}</div>',
             unsafe_allow_html=True
         )
 
-    render_ticker_tape(st.session_state["ticker_tape"])
+    render_tape(st.session_state["ticker_tape"])
 
-
-# ── RIGHT: Pipeline panel ──────────────────────────────────────────
+# ── RIGHT: Pipeline panel ──────────────────────────────────────────────────────
 with right_col:
+    agent_ph    = st.empty()
+    pipeline_ph = st.empty()
+    qual_ph     = st.empty()
 
-    # Agent status card
-    agent_placeholder = st.empty()
-    pipeline_placeholder = st.empty()
-    qualified_placeholder = st.empty()
-
-    def render_agent_card(title: str, subtitle: str, count: str, running: bool = False):
-        dot_color = "#00ff88" if running else "#333"
-        pulse = "animation:pulse 1s infinite;" if running else ""
-        agent_placeholder.markdown(f"""
-        <div class="agent-panel">
-          <div class="agent-header">
-            <div>
-              <div class="agent-title">
-                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                  background:{dot_color};margin-right:8px;{pulse}"></span>
-                {title}
-              </div>
-              <div style="color:#444;font-size:11px;margin-top:2px;">{subtitle}</div>
+    def render_agent(title, sub, count, running=False):
+        dot_color = "#F07D2A" if running else ("#00C805" if count != "—" else "#222")
+        pulse_css = "animation:pulse 0.8s infinite;" if running else ""
+        agent_ph.markdown(f"""
+        <div style="border:1px solid #1a1a1a;border-top:2px solid #F07D2A;
+             background:#000;padding:12px 14px;display:flex;
+             justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                background:{dot_color};{pulse_css}"></span>
+              <span style="color:#F07D2A;font-size:11px;font-weight:700;letter-spacing:1px;">{title}</span>
             </div>
-            <div class="agent-num">{count}</div>
+            <div style="color:#444;font-size:10px;margin-top:3px;margin-left:16px;">{sub}</div>
           </div>
+          <div style="font-size:28px;font-weight:700;color:#F07D2A;letter-spacing:1px;">{count}</div>
         </div>
         """, unsafe_allow_html=True)
 
-    def render_pipeline(counts: dict, universe_size: int = 509):
+    def render_pipeline(counts: dict, n: int = 509):
         steps = [
-            ("1 · SCAN",        "Fetch OHLCV · yfinance",                   counts.get("universe",    universe_size), universe_size,  True),
-            ("2 · RESEARCH",    "Reddit · RSS · Alpha Vantage · yfinance",   counts.get("research",    None),          universe_size,  counts.get("research") is not None),
-            ("3 · PREDICT",     "XGBoost + sentiment → probability score",   counts.get("scored",      None),          universe_size,  counts.get("scored") is not None),
-            ("4 · RISK",        "Kelly Criterion · $50k bankroll",           counts.get("risk",        None),          universe_size,  counts.get("risk") is not None),
-            ("5 · LEARN",       "Backfill actuals · post-mortem loop",       counts.get("learn",       None),          universe_size,  counts.get("learn") is not None),
+            ("1",  "SCAN",     "FETCH OHLCV · YFINANCE",                 counts.get("universe", n),    n,  True),
+            ("2",  "RESEARCH", "REDDIT · RSS · ALPHA VANTAGE · YFINANCE", counts.get("research", None), n,  "research" in counts),
+            ("3",  "PREDICT",  "XGBOOST + BLENDED SENTIMENT",             counts.get("scored", None),   n,  "scored" in counts),
+            ("4",  "RISK",     "KELLY CRITERION · $50K BANKROLL",         counts.get("risk", None),     n,  "risk" in counts),
+            ("5",  "LEARN",    "BACKFILL ACTUALS · POST-MORTEM LOOP",     counts.get("learn", None),    n,  "learn" in counts),
         ]
-
-        html = '<div class="agent-panel">'
-        html += '<div style="padding:10px 14px;background:#111;border-bottom:1px solid #1a1a1a;color:#444;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;">Filter Pipeline</div>'
-
-        for label, sub, count, total, active in steps:
-            dot_cls   = "active" if active else "pending"
-            count_cls = "" if active else "dim"
-            count_str = str(count) if count is not None else "—"
-            bar_pct   = int((count / total) * 100) if (count and total) else 0
-
+        html = '<div style="border:1px solid #1a1a1a;">'
+        html += ('<div style="background:#0a0a0a;padding:5px 10px;'
+                 'color:#555;font-size:9px;letter-spacing:2px;'
+                 'border-bottom:1px solid #1a1a1a;">FILTER PIPELINE</div>')
+        for num, label, sub, cnt, total, done in steps:
+            dot_cls = "pip-dot-ok" if done else "pip-dot-off"
+            num_cls = "pip-num-ok" if done else "pip-num-off"
+            cnt_str = str(cnt) if cnt is not None else "—"
+            bar_pct = int((cnt / total) * 100) if (cnt and total) else 0
             html += f"""
-            <div class="pipeline-step">
-              <div class="pipeline-dot {dot_cls}"></div>
+            <div class="pip-row">
+              <div class="{dot_cls}"></div>
               <div style="flex:1;">
-                <div class="pipeline-label">{label}</div>
-                <div class="pipeline-sub">{sub}</div>
+                <div style="color:#ccc;font-size:10px;letter-spacing:0.5px;">
+                  <span style="color:#F07D2A;">{num}</span> · {label}
+                </div>
+                <div style="color:#333;font-size:9px;">{sub}</div>
               </div>
-              <div class="pipeline-bar-wrap">
-                <div class="pipeline-bar-fill" style="width:{bar_pct}%;"></div>
+              <div class="pip-bar">
+                <div class="pip-bar-fill" style="width:{bar_pct}%;"></div>
               </div>
-              <div class="pipeline-count {count_cls}">{count_str}</div>
-            </div>
-            """
+              <div class="{num_cls}">{cnt_str}</div>
+            </div>"""
         html += "</div>"
-        pipeline_placeholder.markdown(html, unsafe_allow_html=True)
+        pipeline_ph.markdown(html, unsafe_allow_html=True)
 
     def render_qualified(n: int):
-        color = "#00ff88" if n > 0 else "#333"
-        border_color = "#00ff88" if n > 0 else "#1e1e1e"
-        bg_color = "#0a1f0f" if n > 0 else "#111"
-        qualified_placeholder.markdown(f"""
-        <div style="background:{bg_color};border:1px solid {border_color};border-radius:6px;
-             padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
-          <div style="color:{color};font-size:11px;letter-spacing:2px;text-transform:uppercase;">
-            Qualified Setups
-          </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:{color};">
-            {n} {"FOUND" if n > 0 else "—"}
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+        if n > 0:
+            qual_ph.markdown(f"""
+            <div style="border:1px solid #F07D2A;border-top:2px solid #F07D2A;
+                 background:#060300;padding:14px 16px;
+                 display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+              <div>
+                <div style="color:#555;font-size:9px;letter-spacing:2px;">QUALIFIED SETUPS</div>
+                <div style="color:#F07D2A;font-size:10px;margin-top:2px;letter-spacing:1px;">SCORE ≥ 50 · MOVE TARGET 5%+</div>
+              </div>
+              <div style="font-size:36px;font-weight:700;color:#F07D2A;letter-spacing:2px;">
+                {n} <span style="font-size:14px;letter-spacing:3px;">FOUND</span>
+              </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            qual_ph.markdown("""
+            <div style="border:1px solid #1a1a1a;padding:14px 16px;
+                 display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+              <div style="color:#222;font-size:9px;letter-spacing:2px;">QUALIFIED SETUPS</div>
+              <div style="color:#222;font-size:24px;font-weight:700;">— NONE</div>
+            </div>""", unsafe_allow_html=True)
 
     # Initial render
-    picks_df = st.session_state.get("last_picks")
-    counts   = st.session_state.get("pipeline_counts", {})
-    scan_time = st.session_state.get("scan_time", "")
+    picks_df  = st.session_state["last_picks"]
+    counts    = st.session_state["pipeline_counts"]
+    scan_time = st.session_state["scan_time"]
+    n_picks   = len(picks_df) if picks_df is not None and not picks_df.empty else 0
 
-    render_agent_card(
-        "Market Scan Agent",
-        f"Last scan: {scan_time}" if scan_time else "Ready — click RUN SCAN",
-        str(counts.get("universe", "—")),
-        running=False
-    )
+    render_agent("MARKET SCAN AGENT",
+                 f"LAST SCAN: {scan_time}" if scan_time else "READY · PRESS F8 TO START",
+                 str(n_picks) if n_picks else "—", running=False)
     render_pipeline(counts)
-    render_qualified(len(picks_df) if picks_df is not None and not picks_df.empty else 0)
+    render_qualified(n_picks)
 
 
-# ══════════════════════════════════════════════════════════════════
-#  RUN SCAN (live pipeline updates)
-# ══════════════════════════════════════════════════════════════════
+# ══ RUN SCAN ════════════════════════════════════════════════════════════════════
 if run_clicked:
-    import time
+    import time as _time
     from data.universe import get_universe
     from data.fetcher import get_ohlcv_batch, get_earnings_days
     from data.research import research_universe
     from signals.sentiment import get_sentiment_with_velocity
     from signals.kelly import annotate_picks
-    from model.predictor import predict_universe, model_available
-    from analyst.claude_analyst import explain_picks
+    from model.predictor import predict_universe
     import db
 
     tickers = get_universe()
-    universe_size = len(tickers)
+    N = len(tickers)
 
-    # ── Stage 1: Scan ──────────────────────────────────────────────
-    render_agent_card("1 · Scan Agent", f"Fetching OHLCV for {universe_size} tickers...",
-                      str(universe_size), running=True)
-    render_pipeline({"universe": universe_size})
+    # Stage 1 ─────────────────────────────────────────────────────
+    render_agent("1 · SCAN AGENT", f"FETCHING OHLCV FOR {N} TICKERS...", str(N), running=True)
+    render_pipeline({})
     render_qualified(0)
-
     with st.spinner(""):
         ohlcv_map = get_ohlcv_batch(tickers, period="1y", chunk_size=50)
 
-    # Build ticker tape from fetched data
+    # Build ticker tape from biggest movers
     tape = []
-    for t, df in list(ohlcv_map.items())[:40]:
+    for t, df in ohlcv_map.items():
         if df.empty or len(df) < 2:
             continue
         price = float(df["Close"].iloc[-1])
         prev  = float(df["Close"].iloc[-2])
-        chg   = (price - prev) / prev * 100
-        tape.append({"ticker": t, "price": price, "chg_pct": chg})
+        tape.append({"ticker": t, "price": price, "chg_pct": (price - prev) / prev * 100})
     tape.sort(key=lambda x: abs(x["chg_pct"]), reverse=True)
     st.session_state["ticker_tape"] = tape
-    render_ticker_tape(tape)
+    render_tape(tape)
 
-    # ── Stage 2: Research ──────────────────────────────────────────
-    render_agent_card("2 · Research Agent", "Reddit · RSS · Alpha Vantage · yfinance",
-                      str(universe_size), running=True)
-    render_pipeline({"universe": universe_size, "research": universe_size})
-
+    # Stage 2 ─────────────────────────────────────────────────────
+    render_agent("2 · RESEARCH AGENT", "REDDIT · RSS · ALPHA VANTAGE · YFINANCE", str(N), running=True)
+    render_pipeline({"universe": N})
     with st.spinner(""):
-        blended_sentiment = research_universe(tickers)
-        sentiment_map: dict = {}
-        for ticker in tickers:
-            cached = get_sentiment_with_velocity(ticker)
-            blended = blended_sentiment.get(ticker, {})
-            combined = cached.get("score", 0.0) * 0.4 + blended.get("score", 0.0) * 0.6
-            sentiment_map[ticker] = {
-                **blended, "score": round(combined, 4),
-                "velocity": cached.get("velocity", 0.0),
-                "spike": abs(cached.get("velocity", 0.0)) >= 0.3 or blended.get("score", 0) > 0.4,
-            }
+        blended = research_universe(tickers)
+        sentiment_map = {}
+        for t in tickers:
+            cached   = get_sentiment_with_velocity(t)
+            bl       = blended.get(t, {})
+            combined = cached.get("score", 0) * 0.4 + bl.get("score", 0) * 0.6
+            sentiment_map[t] = {**bl, "score": round(combined, 4),
+                                 "velocity": cached.get("velocity", 0),
+                                 "spike": abs(cached.get("velocity", 0)) >= 0.3 or bl.get("score", 0) > 0.4}
 
-    # ── Stage 3: Predict ───────────────────────────────────────────
-    render_agent_card("3 · Predict Agent", "XGBoost + blended sentiment",
-                      str(universe_size), running=True)
-    render_pipeline({"universe": universe_size, "research": universe_size,
-                     "scored": universe_size})
-
+    # Stage 3 ─────────────────────────────────────────────────────
+    render_agent("3 · PREDICT AGENT", "XGBOOST + BLENDED SENTIMENT → PROBABILITY", str(N), running=True)
+    render_pipeline({"universe": N, "research": N})
     with st.spinner(""):
-        earnings_map: dict = {}
-        for t in tickers[:100]:
-            earnings_map[t] = get_earnings_days(t)
-        picks_df = predict_universe(tickers, ohlcv_map, sentiment_map, earnings_map)
+        earnings_map = {t: get_earnings_days(t) for t in tickers[:100]}
+        picks_df     = predict_universe(tickers, ohlcv_map, sentiment_map, earnings_map)
+    scored = len(picks_df) if picks_df is not None and not picks_df.empty else 0
 
-    scored_count = len(picks_df) if picks_df is not None and not picks_df.empty else 0
-
-    # ── Stage 4: Risk ──────────────────────────────────────────────
-    render_agent_card("4 · Risk Agent", "Kelly Criterion sizing", str(scored_count), running=True)
-    render_pipeline({"universe": universe_size, "research": universe_size,
-                     "scored": scored_count, "risk": scored_count})
-
+    # Stage 4 ─────────────────────────────────────────────────────
+    render_agent("4 · RISK AGENT", "KELLY CRITERION · $50K BANKROLL", str(scored), running=True)
+    render_pipeline({"universe": N, "research": N, "scored": scored})
     if picks_df is not None and not picks_df.empty:
         picks_df = annotate_picks(picks_df)
 
-    # ── Stage 5: Learn ─────────────────────────────────────────────
-    render_agent_card("5 · Learn Agent", "Backfilling actuals · Persisting predictions",
-                      str(scored_count), running=True)
-    render_pipeline({"universe": universe_size, "research": universe_size,
-                     "scored": scored_count, "risk": scored_count, "learn": scored_count})
-
+    # Stage 5 ─────────────────────────────────────────────────────
+    render_agent("5 · LEARN AGENT", "BACKFILLING ACTUALS · PERSISTING TO SUPABASE", str(scored), running=True)
+    render_pipeline({"universe": N, "research": N, "scored": scored, "risk": scored})
     with st.spinner(""):
         if picks_df is not None and not picks_df.empty and db.db_available():
             rows = picks_df.copy()
@@ -340,24 +231,20 @@ if run_clicked:
             rows["actual_move_5d"] = None
             db.append_predictions(rows.to_dict(orient="records"))
 
-    # ── Final state ─────────────────────────────────────────────────
-    scan_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-    st.session_state["last_picks"]      = picks_df
-    st.session_state["scan_time"]       = scan_time
-    st.session_state["pipeline_counts"] = {
-        "universe": universe_size, "research": universe_size,
-        "scored": scored_count, "risk": scored_count, "learn": scored_count
-    }
-
-    render_agent_card("Market Scan Agent", f"Completed · {scan_time}",
-                      str(scored_count), running=False)
-    render_pipeline(st.session_state["pipeline_counts"])
-    render_qualified(scored_count)
+    # Done ────────────────────────────────────────────────────────
+    scan_time = datetime.now().strftime("%H:%M:%S")
+    st.session_state.update({
+        "last_picks": picks_df, "scan_time": scan_time,
+        "pipeline_counts": {"universe": N, "research": N,
+                            "scored": scored, "risk": scored, "learn": scored}
+    })
+    final_counts = st.session_state["pipeline_counts"]
+    render_agent("MARKET SCAN AGENT", f"COMPLETED · {scan_time}", str(scored), running=False)
+    render_pipeline(final_counts)
+    render_qualified(scored)
 
 
-# ══════════════════════════════════════════════════════════════════
-#  LOAD results from Supabase if no session scan
-# ══════════════════════════════════════════════════════════════════
+# ══ LOAD FROM DB IF NO SESSION SCAN ════════════════════════════════════════════
 if picks_df is None:
     try:
         from db import load_predictions_for_date, db_available
@@ -370,77 +257,62 @@ if picks_df is None:
         pass
 
 
-# ══════════════════════════════════════════════════════════════════
-#  RESULTS TABLE
-# ══════════════════════════════════════════════════════════════════
+# ══ RESULTS TABLE ═══════════════════════════════════════════════════════════════
 if picks_df is not None and not picks_df.empty:
-    st.divider()
-    section_header("QUALIFIED SETUPS")
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    bbg_header("QUALIFIED SETUPS", f"{len(picks_df)} RESULTS · SORTED BY SCORE")
 
     rows_html = ""
     for _, row in picks_df.iterrows():
-        score   = row.get("score", 0)
         ticker  = row.get("ticker", "")
+        score   = row.get("score", 0)
         direct  = row.get("direction", "mixed")
         dur     = row.get("duration", "—")
         conf    = row.get("confidence", "—")
         rsi     = row.get("rsi", "—")
-        vol_r   = row.get("volume_ratio", "—")
+        vol     = row.get("volume_ratio", "—")
         kelly   = row.get("dollar_amount", 0)
         risk_lv = row.get("risk_level", "—")
+        sigs    = row.get("signals_triggered", [])
+        if isinstance(sigs, str):
+            sigs = [s.strip() for s in sigs.split(";") if s.strip()]
 
-        conf_color = {"High": "#00ff88", "Medium": "#f59e0b", "Low": "#555"}.get(conf, "#555")
-        dir_html   = direction_badge(direct)
-        score_html = score_pill(score)
-        kelly_str  = f"${kelly:,.0f}" if kelly else "—"
-        rsi_str    = f"{rsi:.1f}" if isinstance(rsi, float) else str(rsi)
-        vol_str    = f"{vol_r:.1f}x" if isinstance(vol_r, float) else str(vol_r)
-
-        risk_color = {"aggressive": "#ef4444", "moderate": "#f59e0b",
-                      "conservative": "#00ff88", "skip": "#333"}.get(risk_lv, "#555")
+        conf_color  = {"High": "#F07D2A", "Medium": "#F0B82A", "Low": "#333"}.get(conf, "#333")
+        risk_color  = {"aggressive": "#FF3333", "moderate": "#F0B82A",
+                       "conservative": "#00C805", "skip": "#333"}.get(risk_lv, "#555")
+        kelly_str   = f"${kelly:,.0f}" if kelly else "—"
+        rsi_str     = f"{rsi:.1f}" if isinstance(rsi, float) else str(rsi)
+        vol_str     = f"{vol:.1f}x" if isinstance(vol, float) else str(vol)
+        sig_html    = signal_tags(sigs[:3])
 
         rows_html += f"""
-        <tr style="border-bottom:1px solid #151515;">
-          <td style="padding:11px 14px;font-family:'JetBrains Mono',monospace;
-              font-weight:700;color:#e8e8e8;font-size:14px;">{ticker}</td>
-          <td style="padding:11px 14px;">{score_html}</td>
-          <td style="padding:11px 14px;">{dir_html}</td>
-          <td style="padding:11px 14px;color:#555;font-size:12px;">{dur}</td>
-          <td style="padding:11px 14px;color:{conf_color};font-size:12px;font-weight:600;">{conf}</td>
-          <td style="padding:11px 14px;font-family:'JetBrains Mono',monospace;
-              color:#888;font-size:13px;">{rsi_str}</td>
-          <td style="padding:11px 14px;font-family:'JetBrains Mono',monospace;
-              color:#888;font-size:13px;">{vol_str}</td>
-          <td style="padding:11px 14px;font-family:'JetBrains Mono',monospace;
-              color:#00ff88;font-weight:700;">{kelly_str}</td>
-          <td style="padding:11px 14px;color:{risk_color};font-size:11px;
-              font-weight:600;text-transform:uppercase;">{risk_lv}</td>
+        <tr>
+          <td style="color:#F07D2A;font-weight:700;font-size:13px;padding:9px 10px;">{ticker}</td>
+          <td style="padding:9px 10px;">{score_chip(score)}</td>
+          <td style="padding:9px 10px;">{direction_html(direct)}</td>
+          <td style="color:#555;font-size:10px;padding:9px 10px;">{dur}</td>
+          <td style="color:{conf_color};font-size:10px;font-weight:700;padding:9px 10px;">{conf.upper()}</td>
+          <td style="color:#888;padding:9px 10px;">{rsi_str}</td>
+          <td style="color:#888;padding:9px 10px;">{vol_str}</td>
+          <td style="color:#F07D2A;font-weight:700;padding:9px 10px;">{kelly_str}</td>
+          <td style="color:{risk_color};font-size:10px;font-weight:700;padding:9px 10px;">{risk_lv.upper()}</td>
+          <td style="padding:9px 10px;">{sig_html}</td>
         </tr>"""
 
+    hdrs = ["TICKER", "SCORE", "SIGNAL", "WINDOW", "CONF", "RSI", "VOL", "KELLY $", "RISK", "TRIGGERS"]
+    th = "".join(f'<th>{h}</th>' for h in hdrs)
+
     st.markdown(f"""
-    <div style="border:1px solid #1e1e1e;border-radius:6px;overflow:hidden;">
-    <table width="100%" cellpadding="0" cellspacing="0"
-           style="border-collapse:collapse;background:#0d0d0d;">
-      <thead>
-        <tr style="background:#111;">
-          {"".join(
-              f'<th style="padding:10px 14px;text-align:left;color:#333;'
-              f'font-size:10px;letter-spacing:1.5px;text-transform:uppercase;">{h}</th>'
-              for h in ["Ticker","Score","Direction","Window","Confidence","RSI","Vol Ratio","Kelly Size","Risk"]
-          )}
-        </tr>
-      </thead>
-      <tbody>{rows_html}</tbody>
-    </table>
-    </div>
-    """, unsafe_allow_html=True)
+    <div style="border:1px solid #1a1a1a;overflow-x:auto;">
+    <table class="bbg-table"><thead><tr>{th}</tr></thead>
+    <tbody>{rows_html}</tbody></table>
+    </div>""", unsafe_allow_html=True)
 
-    # ── Per-ticker chart ───────────────────────────────────────────────────────
-    st.divider()
-    section_header("PRICE CHART")
+    # ── Chart ──────────────────────────────────────────────────────────────────
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    bbg_header("PRICE CHART", "6M CANDLESTICK + BB BANDS")
 
-    tickers_list = picks_df["ticker"].tolist()
-    selected = st.selectbox("", tickers_list, label_visibility="collapsed")
+    selected = st.selectbox("", picks_df["ticker"].tolist(), label_visibility="collapsed")
 
     if selected:
         from data.fetcher import get_ohlcv
@@ -449,46 +321,48 @@ if picks_df is not None and not picks_df.empty:
         df = get_ohlcv(selected, period="6mo")
         if not df.empty:
             bbands = ta.bbands(df["Close"], length=20)
-
             fig = go.Figure()
             fig.add_trace(go.Candlestick(
                 x=df.index, open=df["Open"], high=df["High"],
                 low=df["Low"], close=df["Close"], name=selected,
-                increasing=dict(line=dict(color="#00ff88"), fillcolor="#00ff8822"),
-                decreasing=dict(line=dict(color="#ef4444"), fillcolor="#ef444422"),
+                increasing=dict(line=dict(color="#00C805"), fillcolor="#00280522"),
+                decreasing=dict(line=dict(color="#FF3333"), fillcolor="#28000522"),
             ))
             if bbands is not None and not bbands.empty:
                 u = [c for c in bbands.columns if "BBU" in c]
                 l = [c for c in bbands.columns if "BBL" in c]
-                m = [c for c in bbands.columns if "BBM" in c]
-                if u and l and m:
+                if u and l:
                     fig.add_trace(go.Scatter(x=df.index, y=bbands[u[0]],
-                        line=dict(color="#1e3a1e", width=1), showlegend=False))
+                        line=dict(color="#F07D2A", width=1, dash="dot"),
+                        name="BB Upper", showlegend=False))
                     fig.add_trace(go.Scatter(x=df.index, y=bbands[l[0]],
-                        line=dict(color="#1e3a1e", width=1),
-                        fill="tonexty", fillcolor="rgba(0,255,136,0.03)", showlegend=False))
+                        line=dict(color="#F07D2A", width=1, dash="dot"),
+                        fill="tonexty", fillcolor="rgba(240,125,42,0.04)",
+                        name="BB Lower", showlegend=False))
 
             fig.update_layout(
-                xaxis_rangeslider_visible=False, height=380,
-                template="plotly_dark",
-                paper_bgcolor="#0d0d0d", plot_bgcolor="#0d0d0d",
-                xaxis=dict(gridcolor="#111", showgrid=True, zeroline=False),
-                yaxis=dict(gridcolor="#111", showgrid=True, zeroline=False),
-                margin=dict(l=0, r=0, t=16, b=0),
-                title=dict(text=f"{selected}", font=dict(color="#e8e8e8", size=14), x=0.01),
+                xaxis_rangeslider_visible=False, height=360,
+                paper_bgcolor="#000", plot_bgcolor="#000",
+                xaxis=dict(gridcolor="#0a0a0a", showgrid=True,
+                           tickfont=dict(color="#444", size=9, family="IBM Plex Mono"),
+                           linecolor="#1a1a1a"),
+                yaxis=dict(gridcolor="#0a0a0a", showgrid=True,
+                           tickfont=dict(color="#444", size=9, family="IBM Plex Mono"),
+                           linecolor="#1a1a1a"),
+                margin=dict(l=0, r=0, t=20, b=0),
+                title=dict(text=f"{selected}  ·  6M",
+                           font=dict(color="#F07D2A", size=11, family="IBM Plex Mono"), x=0.01),
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Signal chips
-            row = picks_df[picks_df["ticker"] == selected].iloc[0]
+            row  = picks_df[picks_df["ticker"] == selected].iloc[0]
             sigs = row.get("signals_triggered", [])
             if isinstance(sigs, str):
                 sigs = [s.strip() for s in sigs.split(";") if s.strip()]
             if sigs:
-                st.markdown(
-                    "".join(f'<span style="display:inline-block;background:#0a1f0f;'
-                            f'border:1px solid #00ff88;color:#00ff88;font-size:11px;'
-                            f'padding:3px 10px;border-radius:3px;margin:3px;">{s}</span>'
-                            for s in sigs),
-                    unsafe_allow_html=True
-                )
+                st.markdown(signal_tags(sigs), unsafe_allow_html=True)
+
+scan_time = st.session_state.get("scan_time", "")
+status_bar(f"MKTPRED TERMINAL  ·  SCAN ENGINE v2.0  ·  "
+           f"{'LAST UPDATE: ' + scan_time if scan_time else 'AWAITING SCAN'}  ·  "
+           f"UNIVERSE: S&P 500 + FUTURES")
