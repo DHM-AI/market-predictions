@@ -314,8 +314,10 @@ with hc1:
         unsafe_allow_html=True)
 with hc2:
     if st.button("⟳  Refresh", use_container_width=True, key="refresh_btn"):
-        st.cache_data.clear()
-        st.cache_resource.clear()
+        with st.spinner("Pulling fresh data..."):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            import time; time.sleep(0.8)
         st.rerun()
 
 # ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
