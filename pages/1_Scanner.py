@@ -185,6 +185,11 @@ section[data-testid="stSidebar"] {{
 .waiting-title {{ font-size: 18px; font-weight: 600; color: {TEXT}; }}
 .waiting-sub   {{ font-size: 12px; color: {TEXT2}; line-height: 1.8; }}
 
+/* Hide Streamlit top toolbar */
+header[data-testid="stHeader"] {{ display: none !important; }}
+.stAppHeader {{ display: none !important; }}
+#stDecoration {{ display: none !important; }}
+
 /* Streamlit overrides */
 hr {{ border-color: rgba(0,180,255,0.08) !important; margin: 16px 0 !important; }}
 .stButton > button {{
