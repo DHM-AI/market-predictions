@@ -264,7 +264,7 @@ if st.session_state.get("_refreshing"):
     import time
     st.cache_data.clear()
     st.cache_resource.clear()
-    time.sleep(1.2)
+    time.sleep(1.0)
     st.session_state["_refreshing"] = False
     st.rerun()
 
