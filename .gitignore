@@ -1,0 +1,29 @@
+# Environment — never commit
+.env
+.streamlit/secrets.toml
+
+# Virtual environment
+.venv/
+
+# Local data files (replaced by Supabase)
+logs/
+
+# Large training cache (regenerate locally with python -m model.trainer --refetch)
+model/saved/training_data.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+.idea/
+.vscode/
