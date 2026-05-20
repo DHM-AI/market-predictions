@@ -137,7 +137,7 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
             symbol         = ticker,
             qty            = qty,
             side           = OrderSide.BUY if side == "buy" else OrderSide.SELL,
-            time_in_force  = TimeInForce.GTC,   # Good-till-cancelled for bracket
+            time_in_force  = TimeInForce.DAY,   # Alpaca requires DAY for bracket orders
             order_class    = OrderClass.BRACKET,
             take_profit    = TakeProfitRequest(limit_price=limit_price),
             stop_loss      = StopLossRequest(stop_price=stop_price),

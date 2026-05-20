@@ -30,6 +30,13 @@ def _fetch_feed(url: str) -> list[dict]:
         entries = []
         cutoff = datetime.now() - timedelta(days=2)
         for e in feed.entries:
+            # Skip entries older than 2 days
+            published = e.get("published_parsed") or e.get("updated_parsed")
+            if published:
+                import time as _time
+                entry_dt = datetime.fromtimestamp(_time.mktime(published))
+                if entry_dt < cutoff:
+                    continue
             title = e.get("title", "")
             summary = e.get("summary", "")
             entries.append({"title": title, "summary": summary})

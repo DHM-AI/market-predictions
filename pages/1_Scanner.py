@@ -476,7 +476,7 @@ def live_alpaca():
              TEXT, "Cash you can deploy into new positions right now.")
         + mc("AI Setups Today", str(n_picks) if n_picks else "—", "Score ≥ 50",
              GREEN if n_picks else TEXT2,
-             "Tickers flagged today. Agent scans 3× daily: 8AM · 11:30AM · 3PM ET.")
+             "Tickers flagged today. Agent scans 7× daily: 7AM · 9AM · 10:30AM · 12PM · 2PM · 3:30PM · 4PM ET.")
         + mc("Auto-Executing",  str(n_auto) if n_auto else "0", "Score ≥ 70",
              GREEN if n_auto else TEXT2,
              "These will be auto-traded via Alpaca bracket orders.")
@@ -692,7 +692,7 @@ with left:
           <div class="wait-ring"></div>
           <div style="font-size:15px;font-weight:600;color:{TEXT};margin-bottom:6px;">Waiting for today's scan</div>
           <div style="font-size:12px;color:{TEXT2};line-height:1.8;">
-            The AI agent runs automatically every weekday at <strong style="color:{GLOW};">8:00 AM ET</strong> via GitHub Actions.<br>
+            The AI agent runs automatically every weekday at <strong style="color:{GLOW};">7× daily starting 7:00 AM ET</strong> via GitHub Actions.<br>
             Hit <strong style="color:{TEXT};">⟳ Refresh Dashboard</strong> to check for new results.
           </div>
         </div>""", unsafe_allow_html=True)

@@ -16,9 +16,7 @@ For stock moves we assume:
 
 We apply a half-Kelly for safety (standard professional practice).
 """
-from config import BANKROLL, KELLY_WIN_PCT, KELLY_LOSS_PCT, KELLY_FRACTION
-
-MAX_POSITION_PCT = 0.10  # never risk more than 10% of bankroll on one trade
+from config import BANKROLL, KELLY_WIN_PCT, KELLY_LOSS_PCT, KELLY_FRACTION, MAX_POSITION_PCT
 
 
 def kelly_fraction(win_prob: float,

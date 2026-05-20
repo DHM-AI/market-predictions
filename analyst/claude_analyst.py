@@ -1,7 +1,13 @@
 import anthropic
 from config import ANTHROPIC_API_KEY, TOP_N_CLAUDE_ANALYSIS
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _client
 
 
 def _build_prompt(row: dict) -> str:
@@ -39,7 +45,7 @@ def explain_picks(scored_df, top_n: int = TOP_N_CLAUDE_ANALYSIS) -> dict[str, st
         ticker = row["ticker"]
         prompt = _build_prompt(row.to_dict())
         try:
-            message = client.messages.create(
+            message = _get_client().messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}],
@@ -58,7 +64,7 @@ def stream_explanation(row: dict):
     """
     prompt = _build_prompt(row)
     try:
-        with client.messages.stream(
+        with _get_client().messages.stream(
             model="claude-sonnet-4-6",
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}],

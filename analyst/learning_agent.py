@@ -13,7 +13,13 @@ import pandas as pd
 import anthropic
 from config import ANTHROPIC_API_KEY, MOVE_TARGET_PCT
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _client
 
 
 def _build_analysis_prompt(hits_df: pd.DataFrame, misses_df: pd.DataFrame) -> str:
@@ -87,7 +93,7 @@ def run_postmortem() -> dict:
     # Claude analysis
     prompt = _build_analysis_prompt(hits, misses)
     try:
-        response = client.messages.create(
+        response = _get_client().messages.create(
             model="claude-sonnet-4-6",
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],

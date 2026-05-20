@@ -136,9 +136,9 @@ def rsi_signal(df: pd.DataFrame, period: int = 14) -> dict:
             return {"value": 50.0, "extreme": False, "side": "neutral"}
         val = float(rsi.iloc[-1])
         if val >= RSI_OVERBOUGHT:
-            return {"value": round(val, 1), "extreme": True, "side": "bull"}
-        if val <= RSI_OVERSOLD:
             return {"value": round(val, 1), "extreme": True, "side": "bear"}
+        if val <= RSI_OVERSOLD:
+            return {"value": round(val, 1), "extreme": True, "side": "bull"}
         return {"value": round(val, 1), "extreme": False, "side": "neutral"}
     except Exception:
         return {"value": 50.0, "extreme": False, "side": "neutral"}

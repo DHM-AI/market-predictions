@@ -14,6 +14,7 @@ _SCHEMA_COLS = {
     "date", "ticker", "score", "direction", "duration", "confidence",
     "signals_triggered", "rsi", "bb_pct", "atr_ratio", "volume_ratio",
     "sentiment_score", "earnings_days", "xgb_prob", "actual_move_5d",
+    "dollar_amount", "kelly_fraction", "pct_of_bankroll", "risk_level",
 }
 
 

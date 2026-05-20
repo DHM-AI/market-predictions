@@ -136,7 +136,6 @@ def train(force_refetch: bool = False) -> None:
         subsample=0.8,
         colsample_bytree=0.8,
         scale_pos_weight=scale_pos_weight,
-        use_label_encoder=False,
         eval_metric="logloss",
         random_state=42,
         n_jobs=-1,
