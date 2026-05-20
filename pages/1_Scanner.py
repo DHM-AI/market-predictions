@@ -319,6 +319,41 @@ with hc2:
         st.rerun()
 
 # ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
+def _next_scan_label() -> str:
+    """Returns human-readable label for the next scheduled scan + countdown."""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import timezone
+        ET = ZoneInfo("America/New_York")
+        now = datetime.now(ET)
+
+        # All 7 daily scan times (hour, minute) in ET
+        SCAN_TIMES = [(7,0),(9,0),(10,30),(12,0),(14,0),(15,30),(16,0)]
+
+        # Build today's scan datetimes
+        today_scans = [
+            now.replace(hour=h, minute=m, second=0, microsecond=0)
+            for h, m in SCAN_TIMES
+        ]
+        future = [s for s in today_scans if s > now]
+
+        if future:
+            nxt  = future[0]
+            diff = int((nxt - now).total_seconds())
+            h, m = divmod(diff // 60, 60)
+            countdown = f"in {h}h {m}m" if h else f"in {m}m"
+            return f"{nxt.strftime('%-I:%M %p')} ET · {countdown}"
+        else:
+            # All done today — show tomorrow's first scan
+            from datetime import timedelta
+            tomorrow = (now + timedelta(days=1)).replace(hour=7, minute=0, second=0)
+            diff = int((tomorrow - now).total_seconds())
+            h = diff // 3600
+            return f"Tomorrow 7:00 AM ET · in {h}h"
+    except Exception:
+        return "7AM · 9AM · 10:30AM · 12PM · 2PM · 3:30PM · 4PM ET"
+
+
 @st.fragment(run_every=30)
 def live_alpaca():
     """Fetches fresh Alpaca data every 30 seconds — P&L, equity, positions."""
@@ -505,7 +540,7 @@ with right:
         (GREEN if last_scan else TEXT3, "Scan", f"Last run {last_scan}" if last_scan else "No scan today yet"),
         (GREEN if db_ok else RED,       "DB",   "Supabase connected" if db_ok else "Database offline"),
         (GREEN if alpaca_ok else RED,   "Alpaca", "API connected" if alpaca_ok else "Not configured"),
-        (AMBER, "Next scans", "8AM · 11:30AM · 3PM ET weekdays"),
+        (AMBER, "Next Scan", _next_scan_label()),
     ]
     items_html = ""
     for color, label, val in status_items:
