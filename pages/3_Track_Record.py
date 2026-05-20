@@ -1,152 +1,157 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
+from ui_style import inject_css, section_header, live_badge
 from config import MOVE_TARGET_PCT
 
 st.set_page_config(page_title="Track Record", page_icon="📋", layout="wide")
-st.title("Track Record")
-st.caption("Historical prediction log — accuracy, calibration, and hit rate over time.")
+inject_css()
+
+st.markdown(
+    f'<h2 style="color:#e8e8e8;font-weight:700;">Track Record{live_badge()}</h2>'
+    f'<p style="color:#444;font-size:13px;margin-top:-8px;">Prediction accuracy · Hit rate · Score calibration</p>',
+    unsafe_allow_html=True
+)
 
 try:
     from db import load_predictions, db_available
     if not db_available():
-        st.warning("Supabase not configured. Add SUPABASE_URL and SUPABASE_KEY to your .env file.")
+        st.markdown('<div style="color:#f59e0b;padding:20px;background:#161616;border:1px solid #1e1e1e;border-radius:6px;">'
+                    '⚠ Supabase not configured. Add SUPABASE_URL and SUPABASE_KEY to your .env</div>',
+                    unsafe_allow_html=True)
         st.stop()
     rows = load_predictions()
 except Exception as e:
-    st.error(f"Could not load predictions from Supabase: {e}")
+    st.error(f"Could not load predictions: {e}")
     st.stop()
 
 if not rows:
-    st.info("No prediction log found yet. Run a scan first.")
+    st.markdown('<div style="color:#333;text-align:center;padding:80px 0;">No predictions yet — run a scan first</div>', unsafe_allow_html=True)
     st.stop()
 
 log = pd.DataFrame(rows)
-if log.empty:
-    st.info("Prediction log is empty.")
-    st.stop()
-
 log["date"] = pd.to_datetime(log["date"])
 log = log.sort_values("date", ascending=False)
 
 # ── Filters ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("Filters")
+    st.markdown('<div style="color:#444;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;">Filters</div>', unsafe_allow_html=True)
     min_date = log["date"].min().date()
     max_date = log["date"].max().date()
-    date_range = st.date_input("Date range", value=(min_date, max_date),
-                                min_value=min_date, max_value=max_date)
-    direction_filter = st.multiselect("Direction", options=["bullish", "bearish", "mixed"],
-                                       default=["bullish", "bearish", "mixed"])
-    confidence_filter = st.multiselect("Confidence", options=["High", "Medium", "Low"],
-                                        default=["High", "Medium", "Low"])
+    date_range = st.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    direction_filter = st.multiselect("Direction", ["bullish","bearish","mixed"], default=["bullish","bearish","mixed"])
+    confidence_filter = st.multiselect("Confidence", ["High","Medium","Low"], default=["High","Medium","Low"])
 
 filtered = log.copy()
 if len(date_range) == 2:
-    filtered = filtered[(filtered["date"].dt.date >= date_range[0]) &
-                        (filtered["date"].dt.date <= date_range[1])]
+    filtered = filtered[(filtered["date"].dt.date >= date_range[0]) & (filtered["date"].dt.date <= date_range[1])]
 if direction_filter:
     filtered = filtered[filtered["direction"].isin(direction_filter)]
 if confidence_filter and "confidence" in filtered.columns:
     filtered = filtered[filtered["confidence"].isin(confidence_filter)]
 
-# ── Evaluated predictions (actual_move_5d filled in) ─────────────────────────
-evaluated = filtered[filtered["actual_move_5d"].notna()].copy()
-evaluated["hit"] = evaluated["actual_move_5d"].abs() >= (MOVE_TARGET_PCT * 100)
+evaluated = filtered[filtered["actual_move_5d"].notna()].copy() if "actual_move_5d" in filtered.columns else pd.DataFrame()
+if not evaluated.empty:
+    evaluated["hit"] = evaluated["actual_move_5d"].abs() >= (MOVE_TARGET_PCT * 100)
 
-# ── Summary metrics ───────────────────────────────────────────────────────────
+# ── Metrics ────────────────────────────────────────────────────────────────────
+st.divider()
+section_header("PERFORMANCE SUMMARY")
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Total Predictions", len(filtered))
 m2.metric("Evaluated", len(evaluated))
-
-if len(evaluated) > 0:
+if not evaluated.empty and len(evaluated) > 0:
     hit_rate = evaluated["hit"].mean() * 100
     avg_move = evaluated["actual_move_5d"].abs().mean()
-    best_move = evaluated["actual_move_5d"].abs().max()
+    best     = evaluated["actual_move_5d"].abs().max()
     m3.metric("Hit Rate", f"{hit_rate:.1f}%")
     m4.metric("Avg Move", f"{avg_move:.1f}%")
-    m5.metric("Best Move", f"{best_move:.1f}%")
-else:
-    m3.metric("Hit Rate", "N/A")
-    m4.metric("Avg Move", "N/A")
-    m5.metric("Best Move", "N/A")
-    st.info("No evaluated predictions yet — actual_move_5d is filled automatically after 5 trading days.")
+    m5.metric("Best Move", f"{best:.1f}%")
 
-st.divider()
+# ── Charts ─────────────────────────────────────────────────────────────────────
+if not evaluated.empty and len(evaluated) > 5:
+    st.divider()
+    c1, c2 = st.columns(2)
 
-# ── Hit rate by confidence ─────────────────────────────────────────────────────
-if len(evaluated) > 5 and "confidence" in evaluated.columns:
-    col_a, col_b = st.columns(2)
+    with c1:
+        section_header("HIT RATE BY CONFIDENCE")
+        if "confidence" in evaluated.columns:
+            conf_stats = evaluated.groupby("confidence").agg(hit_rate=("hit","mean")).reset_index()
+            conf_stats["hit_rate_pct"] = conf_stats["hit_rate"] * 100
+            color_map = {"High": "#00ff88", "Medium": "#f59e0b", "Low": "#555"}
+            fig = px.bar(conf_stats, x="confidence", y="hit_rate_pct", color="confidence",
+                         color_discrete_map=color_map, text="hit_rate_pct")
+            fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside", textfont_color="#e8e8e8")
+            fig.update_layout(template="plotly_dark", paper_bgcolor="#161616",
+                              plot_bgcolor="#161616", showlegend=False, height=280,
+                              margin=dict(l=0,r=0,t=10,b=0),
+                              yaxis=dict(gridcolor="#1e1e1e"),
+                              xaxis=dict(title=""), yaxis_title="Hit Rate (%)")
+            st.plotly_chart(fig, use_container_width=True)
 
-    with col_a:
-        st.subheader("Hit Rate by Confidence")
-        conf_stats = evaluated.groupby("confidence").agg(
-            predictions=("hit", "count"),
-            hit_rate=("hit", "mean"),
-        ).reset_index()
-        conf_stats["hit_rate_pct"] = (conf_stats["hit_rate"] * 100).round(1)
-        fig_conf = px.bar(conf_stats, x="confidence", y="hit_rate_pct",
-                           color="confidence",
-                           color_discrete_map={"High": "#15803d", "Medium": "#b45309", "Low": "#6b7280"},
-                           labels={"hit_rate_pct": "Hit Rate (%)", "confidence": "Confidence"},
-                           text="hit_rate_pct")
-        fig_conf.update_traces(texttemplate="%{text}%", textposition="outside")
-        fig_conf.update_layout(template="plotly_white", showlegend=False, height=300)
-        st.plotly_chart(fig_conf, use_container_width=True)
-
-    with col_b:
-        st.subheader("Score vs Actual Move")
+    with c2:
+        section_header("SCORE vs ACTUAL MOVE")
         if "score" in evaluated.columns:
-            fig_scatter = px.scatter(
-                evaluated, x="score", y="actual_move_5d",
-                color="hit",
-                color_discrete_map={True: "#16a34a", False: "#dc2626"},
-                labels={"score": "Prediction Score", "actual_move_5d": "Actual Move (%)"},
-                hover_data=["ticker", "date", "direction"],
-            )
-            fig_scatter.add_hline(y=5, line_dash="dot", line_color="#16a34a",
-                                   annotation_text="+5% target")
-            fig_scatter.add_hline(y=-5, line_dash="dot", line_color="#dc2626",
-                                   annotation_text="-5% target")
-            fig_scatter.update_layout(template="plotly_white", height=300)
-            st.plotly_chart(fig_scatter, use_container_width=True)
+            fig2 = px.scatter(evaluated, x="score", y="actual_move_5d",
+                              color="hit", color_discrete_map={True:"#00ff88", False:"#ef4444"},
+                              hover_data=["ticker","date","direction"])
+            fig2.add_hline(y=5, line_dash="dot", line_color="#00ff8866")
+            fig2.add_hline(y=-5, line_dash="dot", line_color="#ef444466")
+            fig2.update_layout(template="plotly_dark", paper_bgcolor="#161616",
+                               plot_bgcolor="#161616", showlegend=False, height=280,
+                               margin=dict(l=0,r=0,t=10,b=0),
+                               yaxis=dict(gridcolor="#1e1e1e"),
+                               xaxis=dict(gridcolor="#1e1e1e"))
+            st.plotly_chart(fig2, use_container_width=True)
 
+# ── Full log table ─────────────────────────────────────────────────────────────
 st.divider()
+section_header("PREDICTION LOG")
 
-# ── Direction accuracy ─────────────────────────────────────────────────────────
-if len(evaluated) > 5 and "direction" in evaluated.columns:
-    st.subheader("Direction Accuracy")
-    evaluated["direction_correct"] = (
-        ((evaluated["direction"] == "bullish") & (evaluated["actual_move_5d"] > 0)) |
-        ((evaluated["direction"] == "bearish") & (evaluated["actual_move_5d"] < 0))
-    )
-    dir_acc = evaluated[evaluated["direction"] != "mixed"]["direction_correct"].mean()
-    st.metric("Direction accuracy (excl. mixed)", f"{dir_acc*100:.1f}%")
-
-st.divider()
-
-# ── Full prediction log ────────────────────────────────────────────────────────
-st.subheader("Full Prediction Log")
-show_cols = [c for c in ["date", "ticker", "score", "direction", "confidence", "duration",
-                          "signals_triggered", "actual_move_5d"]
-             if c in filtered.columns]
+show_cols = [c for c in ["date","ticker","score","direction","confidence","duration","actual_move_5d"] if c in filtered.columns]
 display = filtered[show_cols].copy()
 display["date"] = display["date"].dt.strftime("%Y-%m-%d")
 
-def style_actual(val):
-    if pd.isna(val):
-        return ""
-    if abs(val) >= 5:
-        return "color: #16a34a; font-weight: bold" if val > 0 else "color: #dc2626; font-weight: bold"
-    return "color: #6b7280"
+rows_html = ""
+for _, row in display.iterrows():
+    move = row.get("actual_move_5d", None)
+    if pd.isna(move) if move is not None else True:
+        move_str = '<span style="color:#333;">Pending</span>'
+    else:
+        color = "#00ff88" if abs(move) >= 5 else "#555"
+        arrow = "▲" if move > 0 else "▼"
+        move_str = f'<span style="color:{color};font-family:JetBrains Mono,monospace;">{arrow} {abs(move):.1f}%</span>'
 
-styled = display.style.map(style_actual, subset=["actual_move_5d"]) if "actual_move_5d" in display.columns else display.style
-st.dataframe(styled, use_container_width=True, height=400, hide_index=True)
+    dir_ = row.get("direction","")
+    dir_color = {"bullish":"#00ff88","bearish":"#ef4444"}.get(dir_,"#555")
+    score_ = row.get("score", 0)
+    score_color = "#00ff88" if score_ >= 70 else "#f59e0b" if score_ >= 50 else "#555"
+    conf_ = row.get("confidence","")
+    conf_color = {"High":"#00ff88","Medium":"#f59e0b","Low":"#555"}.get(conf_,"#555")
 
-st.download_button(
-    label="Download CSV",
-    data=filtered.to_csv(index=False),
-    file_name="market_predictions.csv",
-    mime="text/csv",
-)
+    rows_html += f"""<tr style="border-bottom:1px solid #1a1a1a;">
+      <td style="padding:8px 12px;color:#555;font-size:12px;">{row.get('date','')}</td>
+      <td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-weight:700;color:#e8e8e8;">{row.get('ticker','')}</td>
+      <td style="padding:8px 12px;font-family:JetBrains Mono,monospace;color:{score_color};">{score_}</td>
+      <td style="padding:8px 12px;color:{dir_color};font-weight:600;font-size:12px;">{dir_.upper()}</td>
+      <td style="padding:8px 12px;color:{conf_color};font-size:12px;">{conf_}</td>
+      <td style="padding:8px 12px;color:#555;font-size:12px;">{row.get('duration','')}</td>
+      <td style="padding:8px 12px;">{move_str}</td>
+    </tr>"""
+
+st.markdown(f"""
+<div style="overflow-y:auto;max-height:500px;border:1px solid #1e1e1e;border-radius:6px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#0d0d0d;">
+  <thead style="position:sticky;top:0;z-index:1;">
+    <tr style="background:#111;">
+      {"".join(f'<th style="padding:10px 12px;text-align:left;color:#444;font-size:11px;letter-spacing:1px;text-transform:uppercase;">{h}</th>' for h in ["Date","Ticker","Score","Direction","Confidence","Window","Actual Move"])}
+    </tr>
+  </thead>
+  <tbody>{rows_html}</tbody>
+</table>
+</div>
+""", unsafe_allow_html=True)
+
+st.download_button("⬇ Export CSV", filtered.to_csv(index=False),
+                   file_name="predictions.csv", mime="text/csv")
