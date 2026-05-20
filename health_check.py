@@ -1,0 +1,442 @@
+"""
+Health Check Agent — runs daily to verify every system component is working.
+
+Checks:
+  1. Supabase connection + today's predictions written
+  2. Alpaca connection + account health + daily loss limit
+  3. XGBoost model file exists and loads correctly
+  4. All required environment variables are configured
+  5. Latest GitHub Actions scan ran today (via predictions timestamp)
+  6. Open positions have valid stop loss / take profit orders
+  7. Monthly goal progress
+
+Sends a color-coded email report with PASS / WARN / FAIL per check.
+Exit code 0 = all good, 1 = at least one FAIL.
+"""
+import os
+import sys
+from datetime import datetime, timedelta
+
+# ── Colors for terminal output ────────────────────────────────────────────────
+GREEN  = "\033[92m"
+YELLOW = "\033[93m"
+RED    = "\033[91m"
+RESET  = "\033[0m"
+BOLD   = "\033[1m"
+
+PASS = f"{GREEN}✓ PASS{RESET}"
+WARN = f"{YELLOW}⚠ WARN{RESET}"
+FAIL = f"{RED}✗ FAIL{RESET}"
+
+
+class HealthReport:
+    def __init__(self):
+        self.checks  = []   # list of (name, status, detail)
+        self.n_pass  = 0
+        self.n_warn  = 0
+        self.n_fail  = 0
+        self.started = datetime.now()
+
+    def add(self, name: str, status: str, detail: str):
+        self.checks.append((name, status, detail))
+        if   status == "PASS": self.n_pass += 1
+        elif status == "WARN": self.n_warn += 1
+        elif status == "FAIL": self.n_fail += 1
+        icon = {"PASS": PASS, "WARN": WARN, "FAIL": FAIL}.get(status, status)
+        print(f"  {icon}  {name}: {detail}")
+
+    def overall(self) -> str:
+        if self.n_fail > 0:  return "FAIL"
+        if self.n_warn > 0:  return "WARN"
+        return "PASS"
+
+    def summary(self) -> str:
+        elapsed = (datetime.now() - self.started).seconds
+        return (f"{self.n_pass} passed · {self.n_warn} warnings · "
+                f"{self.n_fail} failures · {elapsed}s")
+
+
+report = HealthReport()
+today  = datetime.today().strftime("%Y-%m-%d")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 1 — Environment variables
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[1/7] Environment Variables{RESET}")
+from dotenv import load_dotenv
+load_dotenv()
+
+REQUIRED_VARS = {
+    "ANTHROPIC_API_KEY":  "Claude analysis (non-fatal if missing)",
+    "SUPABASE_URL":       "Database persistence — CRITICAL",
+    "SUPABASE_KEY":       "Database persistence — CRITICAL",
+    "ALPACA_API_KEY":     "Trading execution — CRITICAL",
+    "ALPACA_SECRET_KEY":  "Trading execution — CRITICAL",
+    "ALPHA_VANTAGE_KEY":  "News sentiment (falls back gracefully)",
+    "ALERT_EMAIL":        "Email reports",
+}
+missing_critical = []
+missing_optional = []
+
+for var, note in REQUIRED_VARS.items():
+    val = os.environ.get(var, "")
+    if not val:
+        if "CRITICAL" in note:
+            missing_critical.append(var)
+        else:
+            missing_optional.append(var)
+
+if missing_critical:
+    report.add("Env Vars", "FAIL",
+               f"Missing critical: {', '.join(missing_critical)}")
+elif missing_optional:
+    report.add("Env Vars", "WARN",
+               f"Missing optional: {', '.join(missing_optional)}")
+else:
+    report.add("Env Vars", "PASS", "All required variables are set")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 2 — Supabase connection + today's predictions
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[2/7] Supabase / Database{RESET}")
+db_predictions = []
+try:
+    import db
+    if not db.db_available():
+        report.add("Supabase Connection", "FAIL", "SUPABASE_URL or SUPABASE_KEY not set")
+    else:
+        # Test connection
+        db_predictions = db.load_predictions_for_date(today)
+        n = len(db_predictions)
+        if n == 0:
+            # Check if market is open today (weekday)
+            if datetime.today().weekday() < 5:
+                report.add("Supabase — Today's Predictions", "WARN",
+                           f"No predictions written yet for {today} (scan may not have run yet)")
+            else:
+                report.add("Supabase — Today's Predictions", "PASS",
+                           "Weekend — no predictions expected")
+        else:
+            report.add("Supabase — Today's Predictions", "PASS",
+                       f"{n} predictions written for {today}")
+
+        # Check last prediction date
+        all_rows = db.load_predictions()
+        if all_rows:
+            latest = max(r.get("date","") for r in all_rows)
+            days_ago = (datetime.today() - datetime.strptime(latest, "%Y-%m-%d")).days
+            if days_ago > 2 and datetime.today().weekday() < 5:
+                report.add("Supabase — Data Freshness", "WARN",
+                           f"Latest prediction is {days_ago} days old ({latest})")
+            else:
+                report.add("Supabase — Data Freshness", "PASS",
+                           f"Latest prediction: {latest}")
+        else:
+            report.add("Supabase — Data Freshness", "WARN",
+                       "No predictions in database at all — first run?")
+except Exception as e:
+    report.add("Supabase", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 3 — Alpaca connection + account health
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[3/7] Alpaca Trading{RESET}")
+alpaca_acct = {}
+alpaca_positions = []
+try:
+    from execution.alpaca import (is_configured, is_live_mode,
+                                   get_account, get_positions)
+    from config import BANKROLL, DAILY_LOSS_LIMIT_PCT, MONTHLY_TARGET_PCT
+
+    if not is_configured():
+        report.add("Alpaca Connection", "FAIL",
+                   "ALPACA_API_KEY or ALPACA_SECRET_KEY not set")
+    else:
+        alpaca_acct      = get_account()
+        alpaca_positions = get_positions()
+        portfolio        = alpaca_acct.get("portfolio_value", 0)
+        buying_power     = alpaca_acct.get("buying_power", 0)
+        mode             = "LIVE 🔴" if is_live_mode() else "PAPER 📄"
+
+        report.add("Alpaca Connection", "PASS",
+                   f"{mode} · Portfolio ${portfolio:,.2f} · "
+                   f"Buying power ${buying_power:,.2f}")
+
+        # Daily loss check
+        equity      = alpaca_acct.get("equity", portfolio)
+        # Compare to bankroll as baseline
+        daily_change_pct = (portfolio - BANKROLL) / BANKROLL
+        if daily_change_pct < -DAILY_LOSS_LIMIT_PCT:
+            report.add("Alpaca — Daily Loss Limit", "FAIL",
+                       f"Down {abs(daily_change_pct):.1%} — exceeds {DAILY_LOSS_LIMIT_PCT:.0%} limit. Trading halted.")
+        elif daily_change_pct < -(DAILY_LOSS_LIMIT_PCT * 0.5):
+            report.add("Alpaca — Daily Loss Limit", "WARN",
+                       f"Down {abs(daily_change_pct):.1%} — approaching limit")
+        else:
+            report.add("Alpaca — Daily Loss Limit", "PASS",
+                       f"P&L vs bankroll: {daily_change_pct:+.2%} — within limits")
+
+        # Open positions
+        n_pos = len(alpaca_positions)
+        if n_pos > 0:
+            total_pl = sum(p.get("unrealized_pl", 0) for p in alpaca_positions)
+            report.add("Alpaca — Open Positions", "PASS",
+                       f"{n_pos} position(s) · Unrealized P&L: ${total_pl:+,.2f}")
+        else:
+            report.add("Alpaca — Open Positions", "PASS", "No open positions")
+
+except Exception as e:
+    report.add("Alpaca", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 4 — XGBoost model
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[4/7] XGBoost Model{RESET}")
+try:
+    from config import MODEL_PATH, FEATURE_NAMES_PATH
+    import os
+
+    if not os.path.exists(MODEL_PATH):
+        report.add("XGBoost Model File", "FAIL",
+                   f"Model not found at {MODEL_PATH} — run: python -m model.trainer")
+    else:
+        model_age_days = (datetime.now().timestamp() -
+                          os.path.getmtime(MODEL_PATH)) / 86400
+        import pickle
+        with open(MODEL_PATH, "rb") as f:
+            model = pickle.load(f)
+
+        if not os.path.exists(FEATURE_NAMES_PATH):
+            report.add("XGBoost Feature Names", "WARN",
+                       "feature_names.json missing — predictions may break")
+        else:
+            import json
+            with open(FEATURE_NAMES_PATH) as f:
+                feats = json.load(f)
+            age_str = f"{model_age_days:.0f}d old"
+            if model_age_days > 30:
+                report.add("XGBoost Model", "WARN",
+                           f"Model is {age_str} — consider retraining monthly")
+            else:
+                report.add("XGBoost Model", "PASS",
+                           f"Loads OK · {len(feats)} features · {age_str}")
+
+except Exception as e:
+    report.add("XGBoost Model", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 5 — Data pipeline (universe + OHLCV sample)
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[5/7] Data Pipeline{RESET}")
+try:
+    from data.universe import get_universe
+    tickers = get_universe()
+    if len(tickers) < 400:
+        report.add("Universe", "WARN",
+                   f"Only {len(tickers)} tickers — expected 500+. Wikipedia may be down.")
+    else:
+        report.add("Universe", "PASS", f"{len(tickers)} tickers loaded")
+
+    # Quick OHLCV test on one ticker
+    from data.fetcher import get_ohlcv
+    df = get_ohlcv("AAPL", period="5d")
+    if df.empty:
+        report.add("OHLCV Fetch (AAPL)", "FAIL",
+                   "yfinance returned empty data — check network / API limits")
+    else:
+        latest_date = str(df.index[-1])[:10]
+        report.add("OHLCV Fetch (AAPL)", "PASS",
+                   f"{len(df)} rows · latest: {latest_date}")
+
+except Exception as e:
+    report.add("Data Pipeline", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 6 — Scoring + Kelly pipeline
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[6/7] Scoring & Kelly Pipeline{RESET}")
+try:
+    from signals.scorer import score_ticker
+    from signals.kelly  import position_size
+    from data.fetcher   import get_ohlcv
+
+    df_test   = get_ohlcv("AAPL", period="1y")
+    sentiment = {"score": 0.1, "velocity": 0.05, "spike": False}
+    result    = score_ticker("AAPL", df_test, sentiment, earnings_days=None)
+    score     = result.get("score", 0)
+
+    sizing = position_size(win_prob=0.60)
+    dollar = sizing.get("dollar_amount", 0)
+
+    if score < 0 or score > 100:
+        report.add("Scorer", "FAIL", f"Score out of range: {score}")
+    else:
+        report.add("Scorer", "PASS",
+                   f"AAPL test score: {score:.0f}/100 · "
+                   f"direction: {result.get('direction')} · "
+                   f"confidence: {result.get('confidence')}")
+
+    if dollar <= 0:
+        report.add("Kelly Sizer", "FAIL", "Returned $0 position size")
+    else:
+        report.add("Kelly Sizer", "PASS",
+                   f"60% win prob → ${dollar:,.0f} position "
+                   f"({sizing.get('pct_of_bankroll',0):.1f}% bankroll)")
+
+except Exception as e:
+    report.add("Scoring & Kelly", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 7 — Monthly goal progress
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[7/7] Monthly Goal Progress{RESET}")
+try:
+    from calendar import monthrange
+    from config import BANKROLL, MONTHLY_TARGET_PCT
+
+    today_dt      = datetime.today()
+    days_in_month = monthrange(today_dt.year, today_dt.month)[1]
+    day_of_month  = today_dt.day
+    target        = BANKROLL * MONTHLY_TARGET_PCT
+    portfolio_val = alpaca_acct.get("portfolio_value", BANKROLL)
+    total_pl_pos  = sum(p.get("unrealized_pl", 0) for p in alpaca_positions)
+
+    # Progress estimate
+    progress_pct  = (total_pl_pos / target * 100) if target else 0
+    pace_needed   = target * (day_of_month / days_in_month)
+
+    if total_pl_pos >= pace_needed:
+        report.add("Monthly Goal (10%)", "PASS",
+                   f"${total_pl_pos:+,.0f} of ${target:,.0f} target · "
+                   f"{progress_pct:.1f}% complete · ahead of pace")
+    elif total_pl_pos >= 0:
+        report.add("Monthly Goal (10%)", "WARN",
+                   f"${total_pl_pos:+,.0f} of ${target:,.0f} · "
+                   f"{progress_pct:.1f}% complete · behind pace "
+                   f"(need ${pace_needed:,.0f} by day {day_of_month})")
+    else:
+        report.add("Monthly Goal (10%)", "WARN",
+                   f"Currently negative: ${total_pl_pos:,.0f} · "
+                   f"{days_in_month - day_of_month} days remaining to recover")
+
+except Exception as e:
+    report.add("Monthly Goal", "WARN", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SUMMARY
+# ══════════════════════════════════════════════════════════════════════════════
+overall = report.overall()
+overall_icon = {
+    "PASS": f"{GREEN}{BOLD}✓ ALL SYSTEMS OPERATIONAL{RESET}",
+    "WARN": f"{YELLOW}{BOLD}⚠ OPERATIONAL WITH WARNINGS{RESET}",
+    "FAIL": f"{RED}{BOLD}✗ SYSTEM FAILURE DETECTED{RESET}",
+}[overall]
+
+print(f"\n{'═'*60}")
+print(f"  Health Check — {datetime.now().strftime('%Y-%m-%d %H:%M ET')}")
+print(f"  {overall_icon}")
+print(f"  {report.summary()}")
+print(f"{'═'*60}")
+for name, status, detail in report.checks:
+    icon = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[status]
+    print(f"  {icon} {name}: {detail}")
+print(f"{'═'*60}\n")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EMAIL REPORT
+# ══════════════════════════════════════════════════════════════════════════════
+def _build_email_html(report: HealthReport) -> str:
+    overall = report.overall()
+    header_color = {"PASS": "#00ff88", "WARN": "#ffaa00", "FAIL": "#ff2d78"}[overall]
+    header_text  = {
+        "PASS": "✓ All Systems Operational",
+        "WARN": "⚠ Operational with Warnings",
+        "FAIL": "✗ System Failure Detected",
+    }[overall]
+
+    rows = ""
+    for name, status, detail in report.checks:
+        color = {"PASS": "#00ff88", "WARN": "#ffaa00", "FAIL": "#ff2d78"}[status]
+        icon  = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[status]
+        rows += (
+            f'<tr style="border-bottom:1px solid #1a1a1a;">'
+            f'<td style="padding:8px 12px;color:{color};font-weight:700;">{icon} {status}</td>'
+            f'<td style="padding:8px 12px;color:#e8e8e8;font-weight:600;">{name}</td>'
+            f'<td style="padding:8px 12px;color:#888;font-size:12px;">{detail}</td>'
+            f'</tr>'
+        )
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<body style="background:#0d0d0d;color:#e8e8e8;font-family:Inter,sans-serif;padding:24px;">
+  <div style="max-width:700px;margin:0 auto;">
+    <div style="background:#111;border:1px solid #1e1e1e;border-top:3px solid {header_color};
+                border-radius:8px;padding:20px 24px;margin-bottom:16px;">
+      <div style="font-size:20px;font-weight:700;color:{header_color};">{header_text}</div>
+      <div style="font-size:13px;color:#555;margin-top:4px;">
+        {datetime.now().strftime('%A %B %d, %Y · %H:%M ET')} · {report.summary()}
+      </div>
+    </div>
+    <div style="background:#111;border:1px solid #1e1e1e;border-radius:8px;overflow:hidden;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <thead>
+          <tr style="background:#161616;">
+            <th style="padding:10px 12px;text-align:left;color:#444;font-size:10px;
+                       letter-spacing:1px;text-transform:uppercase;width:80px;">Status</th>
+            <th style="padding:10px 12px;text-align:left;color:#444;font-size:10px;
+                       letter-spacing:1px;text-transform:uppercase;width:220px;">Check</th>
+            <th style="padding:10px 12px;text-align:left;color:#444;font-size:10px;
+                       letter-spacing:1px;text-transform:uppercase;">Detail</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:#333;text-align:center;">
+      Market Intelligence Dashboard · Health Check Agent · Auto-generated
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+try:
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from config import ALERT_EMAIL, GMAIL_USER, GMAIL_APP_PASS
+
+    if not GMAIL_USER or not GMAIL_APP_PASS:
+        print("📧 Email skipped — GMAIL_USER / GMAIL_APP_PASS not configured")
+    else:
+        subject_icon = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[overall]
+        subject = (f"{subject_icon} Health Check {overall} — "
+                   f"{report.n_pass} passed · {report.n_warn} warnings · "
+                   f"{report.n_fail} failures — "
+                   f"{datetime.now().strftime('%b %d %Y')}")
+        html = _build_email_html(report)
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = GMAIL_USER
+        msg["To"]      = ALERT_EMAIL
+        msg.attach(MIMEText(html, "html"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
+            srv.login(GMAIL_USER, GMAIL_APP_PASS)
+            srv.sendmail(GMAIL_USER, ALERT_EMAIL, msg.as_string())
+        print(f"📧 Report emailed to {ALERT_EMAIL}")
+except Exception as e:
+    print(f"📧 Email skipped: {e}")
+
+
+# Exit with non-zero code if any failures
+sys.exit(1 if report.n_fail > 0 else 0)

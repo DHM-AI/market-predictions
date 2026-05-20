@@ -1,0 +1,44 @@
+name: Daily Health Check
+
+on:
+  schedule:
+    - cron: '0 21 * * 1-5'   # 5:00 PM ET weekdays — after all scans are done
+    - cron: '0 15 * * 0'     # 11:00 AM ET Sunday — weekend check
+  workflow_dispatch:          # Run manually any time from GitHub Actions tab
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run health check
+        run: python health_check.py
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          ALPHA_VANTAGE_KEY:  ${{ secrets.ALPHA_VANTAGE_KEY }}
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASS:     ${{ secrets.GMAIL_APP_PASS }}
+          ALERT_EMAIL:        ${{ secrets.ALERT_EMAIL }}
+          ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_BASE_URL:    ${{ secrets.ALPACA_BASE_URL }}
+          ALPACA_LIVE_MODE:   ${{ secrets.ALPACA_LIVE_MODE }}
+          BANKROLL:           ${{ secrets.BANKROLL }}
+
+      # GitHub marks the run RED if health_check.py exits with code 1 (any FAIL)
+      # So you can see at a glance in the Actions tab whether the system is healthy
