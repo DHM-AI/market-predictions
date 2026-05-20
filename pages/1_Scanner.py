@@ -33,10 +33,18 @@ st.markdown(f"""
 header[data-testid="stHeader"] {{ display:none !important; }}
 .stAppHeader {{ display:none !important; }}
 #stDecoration {{ display:none !important; }}
-[data-testid="manage-app-button"] {{ display:none !important; }}
-.st-emotion-cache-h4xjwg {{ display:none !important; }}
 footer {{ display:none !important; }}
+footer * {{ display:none !important; }}
 [data-testid="stBottom"] {{ display:none !important; }}
+[data-testid="stBottom"] * {{ display:none !important; }}
+.viewerBadge_container__r5tak {{ display:none !important; }}
+.viewerBadge_link__qRIco {{ display:none !important; }}
+#MainMenu {{ display:none !important; }}
+.st-emotion-cache-h4xjwg {{ display:none !important; }}
+.st-emotion-cache-1dp5vir {{ display:none !important; }}
+/* Nuclear option — hide any fixed bottom bar */
+div[style*="position: fixed"][style*="bottom"] {{ display:none !important; }}
+div[class*="manage"] {{ display:none !important; }}
 section[data-testid="stSidebar"] {{ display:none !important; }}
 [data-testid="collapsedControl"] {{ display:none !important; }}
 .block-container {{ padding:16px 24px !important; max-width:100% !important; }}
@@ -364,7 +372,7 @@ with right:
         (GREEN if last_scan else TEXT3, "Scan", f"Last run {last_scan}" if last_scan else "No scan today yet"),
         (GREEN if db_ok else RED,       "DB",   "Supabase connected" if db_ok else "Database offline"),
         (GREEN if alpaca_ok else RED,   "Alpaca", "API connected" if alpaca_ok else "Not configured"),
-        (AMBER, "Next scan", "08:00 AM ET weekdays"),
+        (AMBER, "Next scans", "8AM · 11:30AM · 3PM ET weekdays"),
     ]
     items_html = ""
     for color, label, val in status_items:
