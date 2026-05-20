@@ -34,13 +34,21 @@ EARNINGS_PROXIMITY_DAYS = 10
 
 # ── Scoring weights (must sum to 100) ─────────────────────────────────────────
 WEIGHTS = {
-    "bb_squeeze":         25,
-    "atr_compression":    15,
-    "volume_surge":       20,
-    "sentiment_spike":    20,
-    "rsi_extreme":        10,
-    "earnings_proximity": 10,
+    "bb_squeeze":         18,   # was 25 — reduced to make room for new signals
+    "atr_compression":    10,   # was 15
+    "volume_surge":       15,   # was 20
+    "sentiment_spike":    15,   # was 20
+    "rsi_extreme":        10,   # unchanged
+    "earnings_proximity":  7,   # was 10
+    "candlestick":         8,   # NEW — pattern detection (hammer, engulfing, pin bar)
+    "options_flow":       10,   # NEW — put/call ratio institutional signal
+    "short_squeeze":       7,   # NEW — high short interest + bullish momentum
 }
+# Total: 18+10+15+15+10+7+8+10+7 = 100
+
+# ── Market regime ──────────────────────────────────────────────────────────────
+REGIME_CACHE_MINUTES  = 30   # re-fetch regime every 30 minutes during scan
+ENABLE_OPTIONS_FLOW   = True  # set False to skip options API (faster scans)
 
 # ── Goal ──────────────────────────────────────────────────────────────────────
 MONTHLY_TARGET_PCT  = 0.10   # 10% per month target return

@@ -357,6 +357,41 @@ with hc2:
         st.session_state["_refreshing"] = True
         st.rerun()
 
+# ── MARKET REGIME STRIP ───────────────────────────────────────────────────────
+try:
+    from signals.market_regime import get_market_regime
+    _regime = get_market_regime()
+    _r_icon  = {"bull": "🟢", "neutral": "🟡", "bear": "🔴"}.get(_regime["regime"], "⚪")
+    _r_color = {"bull": GREEN, "neutral": AMBER, "bear": RED}.get(_regime["regime"], TEXT3)
+    _r_bg    = {"bull": "rgba(0,255,136,0.06)", "neutral": "rgba(255,170,0,0.06)",
+                "bear": "rgba(255,45,120,0.06)"}.get(_regime["regime"], "rgba(255,255,255,0.03)")
+
+    _spy_pct = _regime.get("spy_vs_200ma_pct", 0)
+    _spy_col = GREEN if _spy_pct > 2 else RED if _spy_pct < -2 else AMBER
+    _vix     = _regime.get("vix", 0)
+    _vix_col = GREEN if _vix < 20 else AMBER if _vix < 30 else RED
+    _secs    = _regime.get("sectors_above_50ma", 0)
+    _warn    = _regime.get("warning", "")
+
+    _regime_html = (
+        f'<div style="display:flex;align-items:center;gap:16px;padding:8px 14px;'
+        f'background:{_r_bg};border:1px solid {_r_color}22;border-radius:7px;margin-bottom:12px;'
+        f'font-size:11px;flex-wrap:wrap;">'
+        f'<span style="font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:{_r_color};">'
+        f'{_r_icon} {_regime["regime"].upper()} REGIME</span>'
+        f'<span style="color:{TEXT3};">|</span>'
+        f'<span style="color:{TEXT3};">VIX</span>&nbsp;<span style="color:{_vix_col};font-family:JetBrains Mono,monospace;font-weight:700;">{_vix:.1f}</span>'
+        f'<span style="color:{TEXT3};">|</span>'
+        f'<span style="color:{TEXT3};">SPY vs 200MA</span>&nbsp;<span style="color:{_spy_col};font-family:JetBrains Mono,monospace;font-weight:700;">{_spy_pct:+.1f}%</span>'
+        f'<span style="color:{TEXT3};">|</span>'
+        f'<span style="color:{TEXT3};">Sectors above 50MA</span>&nbsp;<span style="color:{TEXT};font-family:JetBrains Mono,monospace;font-weight:700;">{_secs}/11</span>'
+        + (f'<span style="color:{TEXT3};">|</span><span style="color:{AMBER};">⚠ {_warn}</span>' if _warn else "")
+        + f'</div>'
+    )
+    st.markdown(_regime_html, unsafe_allow_html=True)
+except Exception:
+    pass   # regime check is non-blocking
+
 # ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
 def _market_clock() -> str:
     """Current ET time formatted as market clock."""

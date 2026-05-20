@@ -1,6 +1,7 @@
 import pandas as pd
 from signals.technicals import compute_all
 from signals.sentiment import get_sentiment_with_velocity, normalize_score
+from signals.patterns import detect_patterns
 from data.fetcher import get_earnings_days
 from config import WEIGHTS, EARNINGS_PROXIMITY_DAYS, MIN_SCORE_TO_ALERT
 
@@ -121,26 +122,63 @@ def score_ticker(
     else:
         breakdown["earnings_proximity"] = 0
 
-    direction = _determine_direction(technicals, sentiment)
-    duration = _determine_duration(technicals, earnings_days)
+    # ── Candlestick patterns ────────────────────────────────────────────────
+    direction_early = _determine_direction(technicals, sentiment)
+    pattern_result  = detect_patterns(ohlcv_df)
+    pattern_name    = pattern_result.get("pattern")
+    pattern_side    = pattern_result.get("side", "neutral")
+    pattern_weight  = WEIGHTS.get("candlestick", 8)
+
+    if pattern_result.get("triggered") and pattern_side == direction_early[:4]:
+        # Pattern confirms direction — full weight
+        pts = round(pattern_weight * pattern_result.get("strength", 0.5))
+        raw_score += pts
+        breakdown["candlestick"] = pts
+        signals_triggered.append(f"{pattern_name} (strength={pattern_result['strength']:.2f})")
+    elif pattern_result.get("triggered") and pattern_side != "neutral" and pattern_side != direction_early[:4]:
+        # Pattern contradicts direction — penalize slightly
+        raw_score  = max(0, raw_score - round(pattern_weight * 0.3))
+        breakdown["candlestick"] = 0
+    else:
+        breakdown["candlestick"] = 0
+
+    # ── Short squeeze proxy (from OHLCV only, no API call) ─────────────────
+    # Proxy: RSI recovering from oversold + price breaking above 20-day high
+    # + volume surge — all classic squeeze precursors
+    squeeze_pts = 0
+    if (technicals["rsi"]["value"] is not None
+            and 35 < technicals["rsi"]["value"] < 55   # recovering from oversold
+            and technicals["vol"]["triggered"]           # volume surge
+            and technicals["bb"]["triggered"]):          # squeeze setup
+        squeeze_pts = WEIGHTS.get("short_squeeze", 7)
+        raw_score  += squeeze_pts
+        breakdown["short_squeeze"] = squeeze_pts
+        signals_triggered.append(f"Squeeze proxy (RSI recovering + volume surge)")
+    else:
+        breakdown["short_squeeze"] = 0
+
+    direction  = _determine_direction(technicals, sentiment)
+    duration   = _determine_duration(technicals, earnings_days)
     confidence = _determine_confidence(raw_score)
 
     return {
-        "ticker": ticker,
-        "score": raw_score,
-        "direction": direction,
-        "duration": duration,
-        "confidence": confidence,
-        "signals_triggered": signals_triggered,
-        "breakdown": breakdown,
-        "rsi": technicals["rsi"]["value"],
-        "bb_pct": technicals["bb"]["width_percentile"],
-        "atr_ratio": technicals["atr"]["ratio"],
-        "volume_ratio": technicals["vol"]["ratio"],
-        "ema50_pct": technicals["ema"]["ema50_pct"],
-        "sentiment_score": sentiment.get("score", 0.0),
+        "ticker":             ticker,
+        "score":              raw_score,
+        "direction":          direction,
+        "duration":           duration,
+        "confidence":         confidence,
+        "signals_triggered":  signals_triggered,
+        "breakdown":          breakdown,
+        "rsi":                technicals["rsi"]["value"],
+        "bb_pct":             technicals["bb"]["width_percentile"],
+        "atr_ratio":          technicals["atr"]["ratio"],
+        "volume_ratio":       technicals["vol"]["ratio"],
+        "ema50_pct":          technicals["ema"]["ema50_pct"],
+        "sentiment_score":    sentiment.get("score", 0.0),
         "sentiment_velocity": sentiment.get("velocity", 0.0),
-        "earnings_days": earnings_days,
+        "earnings_days":      earnings_days,
+        "pattern":            pattern_name,
+        "pattern_side":       pattern_side,
     }
 
 

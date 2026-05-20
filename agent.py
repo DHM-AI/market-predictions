@@ -25,11 +25,14 @@ from data.fetcher import get_ohlcv_batch, get_earnings_days
 from data.research import research_universe
 from signals.sentiment import get_sentiment_with_velocity
 from signals.kelly import annotate_picks
+from signals.market_regime import get_market_regime
+from signals.options_flow import enrich_with_options, get_short_interest
 from model.predictor import predict_universe, model_available
 from analyst.claude_analyst import explain_picks
 from alerts.slack import send_daily_digest, send_trade_alert
+from risk.portfolio_guard import check_trade, increment_daily_count
 from config import (TOP_N_CLAUDE_ANALYSIS, MIN_SCORE_TO_ALERT,
-                    AUTO_EXECUTE_MIN_SCORE, BANKROLL)
+                    AUTO_EXECUTE_MIN_SCORE, BANKROLL, ENABLE_OPTIONS_FLOW)
 import db
 
 
@@ -69,9 +72,10 @@ def _backfill_actual_moves(ohlcv_map: dict) -> None:
         print(f"[agent] Backfilled {changed} actual moves.")
 
 
-def _execute_trades(picks_df: pd.DataFrame, explanations: dict) -> list[dict]:
+def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
+                    regime: dict | None = None) -> list[dict]:
     """Auto-execute High-confidence picks via Alpaca (paper by default)."""
-    from execution.alpaca import is_configured, place_order, is_live_mode
+    from execution.alpaca import is_configured, place_order, is_live_mode, get_positions, get_account
     if not is_configured():
         print("[agent] Alpaca not configured — skipping execution.")
         return []
@@ -79,19 +83,56 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict) -> list[dict]:
     mode = "LIVE 🔴" if is_live_mode() else "PAPER 📄"
     print(f"\n[agent] Alpaca execution ({mode})")
 
-    results = []
+    # Regime gate: if market is in bear regime, skip bullish auto-exec
+    if regime and not regime.get("auto_exec_ok", True):
+        print(f"[agent] ⚠ Regime gate: {regime.get('warning')} — skipping bullish auto-exec")
+
+    # Fetch current positions + account for portfolio guard
+    try:
+        open_positions  = get_positions()
+        account         = get_account()
+        portfolio_value = account.get("portfolio_value", BANKROLL)
+    except Exception:
+        open_positions  = []
+        portfolio_value = BANKROLL
+
+    results    = []
     auto_picks = picks_df[picks_df["score"] >= AUTO_EXECUTE_MIN_SCORE]
     for _, row in auto_picks.iterrows():
-        ticker = row["ticker"]
+        ticker    = row["ticker"]
         direction = row.get("direction", "bullish")
-        dollar = row.get("dollar_amount", 0)
+        dollar    = row.get("dollar_amount", 0)
         if dollar <= 0:
             continue
+
+        # Regime multiplier — reduce position size when market is risky
+        if regime and direction == "bullish":
+            multiplier = regime.get("bull_multiplier", 1.0)
+            if multiplier < 1.0:
+                dollar = round(dollar * multiplier, 2)
+                print(f"  {ticker}: position reduced to ${dollar:.0f} (regime multiplier {multiplier:.0%})")
+
+            # Hard block on bullish trades in bear regime
+            if not regime.get("auto_exec_ok", True):
+                print(f"  {ticker}: SKIPPED — bear regime active")
+                continue
+
+        # Portfolio guard check
+        ok, guard_reason = check_trade(ticker, dollar, direction, open_positions, portfolio_value)
+        if not ok:
+            print(f"  {ticker}: BLOCKED by portfolio guard — {guard_reason}")
+            continue
+        if guard_reason != "ok":
+            print(f"  {ticker}: {guard_reason}")
+
         reason = explanations.get(ticker, "")[:120]
         result = place_order(ticker, dollar, direction, reason)
         results.append(result)
         print(f"  {ticker}: {result.get('status')} ${dollar:.0f} {direction}")
         send_trade_alert(result)   # instant Slack ping when bracket order placed
+        if result.get("status") == "submitted":
+            increment_daily_count()
+
     return results
 
 
@@ -108,9 +149,19 @@ def run_scan(send_email: bool = True,
     print(f"  Bankroll: ${BANKROLL:,.0f}")
     print(f"{'='*62}\n")
 
+    # ── 0. Market Regime ─────────────────────────────────────────
+    print(f"[0/5] REGIME — VIX + SPY trend + sector breadth")
+    regime = get_market_regime()
+    regime_icon = {"bull": "🟢", "neutral": "🟡", "bear": "🔴"}.get(regime["regime"], "⚪")
+    print(f"      {regime_icon} {regime['regime'].upper()} · VIX {regime['vix']} · "
+          f"SPY {regime['spy_vs_200ma_pct']:+.1f}% vs 200MA · "
+          f"{regime['sectors_above_50ma']}/11 sectors above 50MA")
+    if regime.get("warning"):
+        print(f"      ⚠ {regime['warning']}")
+
     # ── 1. Scan ───────────────────────────────────────────────────
     tickers = get_universe()
-    print(f"[1/5] SCAN — {len(tickers)} tickers")
+    print(f"\n[1/5] SCAN — {len(tickers)} tickers")
     ohlcv_map = get_ohlcv_batch(tickers, period="1y", chunk_size=50)
     print(f"      Got data for {len(ohlcv_map)} tickers")
     _backfill_actual_moves(ohlcv_map)
@@ -148,6 +199,22 @@ def run_scan(send_email: bool = True,
 
     print(f"      {len(picks_df)} setups flagged (score ≥ {MIN_SCORE_TO_ALERT})")
 
+    # ── 3.5. Enrich top picks with options flow + short interest ─────────────
+    if ENABLE_OPTIONS_FLOW and not picks_df.empty:
+        top_picks = picks_df[picks_df["score"] >= 60].head(15)
+        if not top_picks.empty:
+            print(f"\n[3.5] ENRICH — options flow + short interest ({len(top_picks)} tickers)")
+            enriched = enrich_with_options(top_picks, verbose=True)
+            # Merge enriched scores back
+            for idx in enriched.index:
+                ticker = enriched.loc[idx, "ticker"]
+                mask   = picks_df["ticker"] == ticker
+                picks_df.loc[mask, "score"] = enriched.loc[idx, "score"]
+                for col in ["options_side","options_pcr","options_unusual","options_detail"]:
+                    if col in enriched.columns:
+                        picks_df.loc[mask, col] = enriched.loc[idx, col]
+            picks_df = picks_df.sort_values("score", ascending=False).reset_index(drop=True)
+
     # ── 4. Risk — Kelly Criterion ─────────────────────────────────
     print(f"\n[4/5] RISK — Kelly Criterion sizing (bankroll ${BANKROLL:,.0f})")
     picks_df = annotate_picks(picks_df)
@@ -170,7 +237,7 @@ def run_scan(send_email: bool = True,
 
     # Alpaca execution
     if execute_trades:
-        trade_results = _execute_trades(picks_df, explanations)
+        trade_results = _execute_trades(picks_df, explanations, regime=regime)
     else:
         print("      Alpaca execution skipped (--no-trade)")
         trade_results = []
