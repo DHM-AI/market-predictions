@@ -41,10 +41,13 @@ WEIGHTS = {
     "earnings_proximity": 10,
 }
 
+# ── Goal ──────────────────────────────────────────────────────────────────────
+MONTHLY_TARGET_PCT  = 0.10   # 10% per month target return
+
 # ── Prediction ────────────────────────────────────────────────────────────────
 MIN_SCORE_TO_ALERT  = 50
 TOP_N_CLAUDE_ANALYSIS = 5
-MOVE_TARGET_PCT     = 0.05
+MOVE_TARGET_PCT     = 0.07   # 7% move target (raised from 5% to support 10%/mo goal)
 
 # ── Model blending weights ────────────────────────────────────────────────────
 XGB_WEIGHT       = 0.70
@@ -52,10 +55,10 @@ SENTIMENT_WEIGHT = 0.30
 
 # ── Kelly Criterion / position sizing ─────────────────────────────────────────
 BANKROLL          = float(os.getenv("BANKROLL", "50000"))
-KELLY_WIN_PCT     = 0.05   # expected gain on a win (5% move target)
+KELLY_WIN_PCT     = 0.07   # expected gain on a win (7% move target — aligned with 10%/mo goal)
 KELLY_LOSS_PCT    = 0.03   # expected loss if wrong (3% stop)
 KELLY_FRACTION    = 0.5    # use half-Kelly for safety
-MAX_POSITION_PCT  = 0.10   # max 10% of bankroll per trade
+MAX_POSITION_PCT  = 0.15   # max 15% of bankroll per trade (raised to support 10%/mo goal)
 DAILY_LOSS_LIMIT_PCT = 0.05  # halt trading if down 5% in a day
 
 # ── Auto-execution threshold ──────────────────────────────────────────────────

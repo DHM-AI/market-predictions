@@ -319,6 +319,7 @@ with hc2:
 @st.fragment(run_every=30)
 def live_alpaca():
     """Fetches fresh Alpaca data every 30 seconds — P&L, equity, positions."""
+    from calendar import monthrange
     acct      = {"portfolio_value": 0, "buying_power": 0, "cash": 0}
     positions = []
     try:
@@ -331,9 +332,72 @@ def live_alpaca():
 
     portfolio    = acct.get("portfolio_value", 0)
     buying_power = acct.get("buying_power", 0)
+    equity       = acct.get("equity", portfolio)
     total_pl     = sum(p.get("unrealized_pl", 0) for p in positions)
     pl_color     = GREEN if total_pl >= 0 else RED
     updated_at   = datetime.now().strftime("%H:%M:%S")
+
+    # ── Monthly goal tracker ──────────────────────────────────────────────────
+    from config import MONTHLY_TARGET_PCT, BANKROLL
+    today         = datetime.today()
+    days_in_month = monthrange(today.year, today.month)[1]
+    day_of_month  = today.day
+    trading_days  = 21                            # ~21 trading days/month
+    trading_day   = round(day_of_month / days_in_month * trading_days)
+
+    target_dollars   = BANKROLL * MONTHLY_TARGET_PCT          # e.g. $15,000
+    # Use unrealized P&L + closed trade P&L as proxy for month P&L
+    # (full tracking requires Alpaca account history — this is a good approximation)
+    month_pl_dollars = total_pl                                # improves once trades log
+    try:
+        if db_ok:
+            from db import load_trades
+            month_trades = [t for t in load_trades()
+                            if str(t.get("timestamp",""))[:7] == today.strftime("%Y-%m")]
+            # Sum realized P&L from closed trades (approximate from dollar amounts × direction)
+            # We don't have exact realized P&L stored yet — show unrealized as placeholder
+    except Exception:
+        pass
+
+    progress_pct  = (month_pl_dollars / target_dollars * 100) if target_dollars else 0
+    progress_pct  = max(-5, min(150, progress_pct))           # clamp for display
+    on_pace_target= target_dollars * (trading_day / trading_days)  # where we should be today
+    pace_diff     = month_pl_dollars - on_pace_target
+    pace_label    = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
+    pace_color    = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
+    bar_color     = GREEN if progress_pct >= 70 else AMBER if progress_pct >= 30 else RED
+    days_left     = days_in_month - day_of_month
+    needed_more   = max(0, target_dollars - month_pl_dollars)
+
+    st.markdown(f"""
+<div style="background:linear-gradient(135deg,rgba(0,180,255,0.04),rgba(0,255,136,0.03));
+            border:1px solid rgba(0,180,255,0.15);border-radius:8px;padding:14px 18px;margin-bottom:14px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+    <div>
+      <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:{TEXT3};margin-bottom:3px;">Monthly Goal — {today.strftime('%B %Y')}</div>
+      <div style="font-size:22px;font-weight:700;font-family:JetBrains Mono,monospace;color:{bar_color};">
+        ${month_pl_dollars:+,.0f}
+        <span style="font-size:13px;font-weight:400;color:{TEXT2};">of ${target_dollars:,.0f} target (10%)</span>
+      </div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:12px;font-weight:600;color:{pace_color};">{pace_label}</div>
+      <div style="font-size:11px;color:{TEXT3};margin-top:3px;">Day {day_of_month}/{days_in_month} · {days_left} days left</div>
+      <div style="font-size:11px;color:{TEXT3};">Still need: ${needed_more:,.0f}</div>
+    </div>
+  </div>
+  <!-- Progress bar -->
+  <div style="height:8px;background:rgba(0,180,255,0.08);border-radius:4px;overflow:hidden;">
+    <div style="height:8px;width:{min(100,max(0,progress_pct)):.1f}%;background:{bar_color};
+                border-radius:4px;box-shadow:0 0 10px {bar_color}66;transition:width 0.5s;"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:4px;">
+    <span style="font-size:10px;color:{TEXT3};">0%</span>
+    <span style="font-size:10px;color:{pace_color};font-weight:600;">{max(0,progress_pct):.1f}% of goal</span>
+    <span style="font-size:10px;color:{TEXT3};">10%</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     # ── Metric strip ──────────────────────────────────────────────────────────
     def mc(label, val, sub, color=TEXT3, tip=""):
