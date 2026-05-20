@@ -369,24 +369,48 @@ def live_alpaca():
         + mc("Auto-Executing",  str(n_auto) if n_auto else "0", "Score ≥ 70",
              GREEN if n_auto else TEXT2,
              "These will be auto-traded via Alpaca bracket orders.")
-        + f'<div class="metric-card" style="--mc:{GLOW}44;">'
-          f'<div class="metric-lbl">Live Update</div>'
-          f'<div class="metric-val" style="color:{GLOW};font-size:18px;" id="localtime">--:--:--</div>'
-          f'<div class="metric-sub">Your local time · auto 30s</div>'
-          f'</div>'
         + f'</div>',
         unsafe_allow_html=True)
 
-    # JS to show browser local time (not server time)
-    st.markdown("""
-<script>
-function updateTime() {
-    const el = document.getElementById('localtime');
-    if (el) el.textContent = new Date().toLocaleTimeString();
-}
-updateTime();
-setInterval(updateTime, 1000);
-</script>""", unsafe_allow_html=True)
+    # ── Local time clock (needs iframe component to actually run JS) ───────────
+    import streamlit.components.v1 as stc
+    clock_html = f"""
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600&display=swap');
+      body {{ margin:0; background:transparent; }}
+      .cw {{
+        background:{SURF}; border:1px solid rgba(0,180,255,0.12);
+        border-radius:8px; padding:12px 14px; position:relative; overflow:hidden;
+      }}
+      .cw::before {{
+        content:''; position:absolute; top:0; left:0; right:0; height:2px;
+        background:rgba(0,212,255,0.4);
+      }}
+      .lbl {{ font-size:9px; font-weight:700; letter-spacing:1.5px;
+              text-transform:uppercase; color:#1e3a50; margin-bottom:4px;
+              font-family:Inter,sans-serif; }}
+      .val {{ font-family:'JetBrains Mono',monospace; font-size:18px;
+              font-weight:600; color:#00d4ff; }}
+      .sub {{ font-size:10px; color:#4a7a9b; margin-top:3px;
+              font-family:Inter,sans-serif; }}
+      .dot {{ display:inline-block; width:6px; height:6px; border-radius:50%;
+              background:#00ff88; margin-right:5px;
+              animation:blink 1.4s infinite; vertical-align:middle; }}
+      @keyframes blink {{ 0%,100%{{opacity:1}} 50%{{opacity:0.25}} }}
+    </style>
+    <div class="cw">
+      <div class="lbl">Your Local Time</div>
+      <div class="val" id="cl">--:--:--</div>
+      <div class="sub"><span class="dot"></span>Auto-refresh every 30s</div>
+    </div>
+    <script>
+      var el = document.getElementById('cl');
+      function tick() {{ el.textContent = new Date().toLocaleTimeString(); }}
+      tick();
+      setInterval(tick, 1000);
+    </script>
+    """
+    stc.html(clock_html, height=78)
 
     # ── Open positions ────────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
