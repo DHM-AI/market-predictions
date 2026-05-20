@@ -33,6 +33,10 @@ st.markdown(f"""
 header[data-testid="stHeader"] {{ display:none !important; }}
 .stAppHeader {{ display:none !important; }}
 #stDecoration {{ display:none !important; }}
+[data-testid="manage-app-button"] {{ display:none !important; }}
+.st-emotion-cache-h4xjwg {{ display:none !important; }}
+footer {{ display:none !important; }}
+[data-testid="stBottom"] {{ display:none !important; }}
 section[data-testid="stSidebar"] {{ display:none !important; }}
 [data-testid="collapsedControl"] {{ display:none !important; }}
 .block-container {{ padding:16px 24px !important; max-width:100% !important; }}
