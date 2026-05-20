@@ -1,21 +1,23 @@
 """
-AI Market Scanner — clean modern dark theme.
-Zinc backgrounds · Indigo accent · Inter + JetBrains Mono
+AI Market Scanner — trading terminal theme.
+Inspired by: dense dark dashboards, teal tickers, colored pill badges.
 """
 import streamlit as st
 
 # ── Color tokens ──────────────────────────────────────────────────────────────
-BG       = "#09090b"   # zinc-950
-CARD     = "#18181b"   # zinc-900
-BORDER   = "#27272a"   # zinc-800
-TEXT     = "#fafafa"   # primary text
-MUTED    = "#71717a"   # zinc-500
-SUBTLE   = "#3f3f46"   # zinc-700
-ACCENT   = "#6366f1"   # indigo-500
-ACCENT_L = "#818cf8"   # indigo-400 (lighter)
-GREEN    = "#22c55e"   # green-500
-RED      = "#ef4444"   # red-500
-AMBER    = "#f59e0b"   # amber-500
+BG       = "#141414"
+CARD     = "#1e1e1e"
+CARD2    = "#232323"
+BORDER   = "#2a2a2a"
+TEXT     = "#e8e8e8"
+MUTED    = "#888888"
+SUBTLE   = "#444444"
+CYAN     = "#22d3ee"   # ticker symbols / links
+GREEN    = "#22c55e"   # bullish / positive / LONG
+RED      = "#ef4444"   # bearish / negative
+ORANGE   = "#f97316"   # SHORT / warning
+AMBER    = "#f59e0b"   # medium confidence
+PURPLE   = "#a78bfa"   # RSI line / accent
 
 
 def inject_css():
@@ -29,62 +31,61 @@ def inject_css():
     }}
     .stApp {{ background: {BG} !important; }}
 
-    /* Sidebar */
     section[data-testid="stSidebar"] {{
-        background: {CARD} !important;
+        background: #111 !important;
         border-right: 1px solid {BORDER} !important;
     }}
-    [data-testid="stSidebarNav"] a {{
-        color: {MUTED} !important;
-        font-size: 13px;
-        font-weight: 500;
-    }}
+    [data-testid="stSidebarNav"] a {{ color: {MUTED} !important; font-size: 13px; }}
     [data-testid="stSidebarNav"] a:hover {{ color: {TEXT} !important; }}
 
-    /* Live badge */
+    /* Live / status badges */
     .live-badge {{
         display: inline-flex; align-items: center; gap: 5px;
-        background: rgba(99,102,241,0.12);
-        border: 1px solid rgba(99,102,241,0.4);
-        color: {ACCENT_L};
+        background: rgba(34,211,238,0.1);
+        border: 1px solid rgba(34,211,238,0.35);
+        color: {CYAN};
         font-size: 10px; font-weight: 600;
-        letter-spacing: 1.5px; text-transform: uppercase;
-        padding: 2px 10px; border-radius: 20px;
-        margin-left: 10px; vertical-align: middle;
+        letter-spacing: 1px; text-transform: uppercase;
+        padding: 2px 9px; border-radius: 4px;
+        margin-left: 8px; vertical-align: middle;
     }}
     .live-dot {{
         width: 5px; height: 5px; border-radius: 50%;
-        background: {ACCENT_L};
-        animation: pulse 1.8s infinite;
+        background: {CYAN};
+        animation: blink 1.4s infinite;
         display: inline-block;
     }}
-    @keyframes pulse {{
-        0%,100% {{ opacity:1; transform:scale(1); }}
-        50% {{ opacity:0.4; transform:scale(0.8); }}
-    }}
+    @keyframes blink {{ 0%,100%{{opacity:1}} 50%{{opacity:0.3}} }}
 
-    /* Cards */
-    .card {{
-        background: {CARD};
-        border: 1px solid {BORDER};
-        border-radius: 10px;
-        padding: 16px 18px;
-        margin-bottom: 10px;
+    /* Section header */
+    .sec-header {{
+        font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+        text-transform: uppercase; color: {MUTED};
+        padding-bottom: 8px;
+        border-bottom: 1px solid {BORDER};
+        margin-bottom: 12px;
+        display: flex; align-items: center; justify-content: space-between;
+    }}
+    .count-badge {{
+        background: {CARD2}; border: 1px solid {BORDER};
+        color: {MUTED}; font-size: 11px; font-weight: 600;
+        padding: 1px 8px; border-radius: 20px;
+        font-family: 'JetBrains Mono', monospace;
     }}
 
     /* Metrics */
     div[data-testid="metric-container"] {{
         background: {CARD} !important;
         border: 1px solid {BORDER} !important;
-        border-radius: 10px !important;
-        padding: 14px 16px !important;
+        border-radius: 6px !important;
+        padding: 12px 14px !important;
     }}
     div[data-testid="metric-container"] label {{
         color: {MUTED} !important;
-        font-size: 11px !important;
-        font-weight: 500 !important;
+        font-size: 10px !important;
+        font-weight: 600 !important;
         text-transform: uppercase;
-        letter-spacing: 0.8px;
+        letter-spacing: 1px;
     }}
     div[data-testid="metric-container"] [data-testid="stMetricValue"] {{
         color: {TEXT} !important;
@@ -95,112 +96,46 @@ def inject_css():
 
     /* Buttons */
     .stButton > button {{
-        background: {ACCENT} !important;
-        color: #fff !important;
-        font-weight: 600 !important;
+        background: {CYAN} !important;
+        color: #000 !important;
+        font-weight: 700 !important;
         border: none !important;
-        border-radius: 8px !important;
-        font-size: 13px !important;
-        letter-spacing: 0.3px;
-        transition: background 0.15s;
+        border-radius: 5px !important;
+        font-size: 12px !important;
+        letter-spacing: 0.5px;
     }}
-    .stButton > button:hover {{ background: #4f46e5 !important; }}
+    .stButton > button:hover {{ opacity: 0.88 !important; }}
     .stButton > button[kind="secondary"] {{
         background: {CARD} !important;
         color: {TEXT} !important;
         border: 1px solid {BORDER} !important;
     }}
-    .stButton > button[kind="secondary"]:hover {{
-        background: {BORDER} !important;
-    }}
 
     /* Inputs */
-    .stTextInput > div > div > input,
-    .stSelectbox > div > div {{
+    .stTextInput > div > div > input {{
         background: {CARD} !important;
         border: 1px solid {BORDER} !important;
-        border-radius: 8px !important;
+        border-radius: 5px !important;
         color: {TEXT} !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
     }}
-    .stTextInput > div > div > input:focus {{ border-color: {ACCENT} !important; }}
+    .stTextInput > div > div > input:focus {{ border-color: {CYAN} !important; }}
     .stTextInput > div > div > input::placeholder {{ color: {MUTED} !important; }}
 
     /* Dividers */
-    hr {{ border-color: {BORDER} !important; margin: 16px 0 !important; }}
+    hr {{ border-color: {BORDER} !important; margin: 14px 0 !important; }}
 
     /* Expanders */
     .streamlit-expanderHeader {{
         background: {CARD} !important;
         border: 1px solid {BORDER} !important;
-        border-radius: 8px !important;
+        border-radius: 5px !important;
         color: {TEXT} !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
     }}
 
-    /* Section headers */
-    .sec-header {{
-        font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
-        text-transform: uppercase; color: {MUTED};
-        padding-bottom: 8px;
-        border-bottom: 1px solid {BORDER};
-        margin-bottom: 14px;
-    }}
-
-    /* Score badges */
-    .score-high {{
-        display: inline-block;
-        background: rgba(34,197,94,0.1);
-        border: 1px solid rgba(34,197,94,0.3);
-        color: {GREEN};
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px; font-weight: 700;
-        padding: 2px 8px; border-radius: 6px;
-    }}
-    .score-med {{
-        display: inline-block;
-        background: rgba(245,158,11,0.1);
-        border: 1px solid rgba(245,158,11,0.3);
-        color: {AMBER};
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px; font-weight: 700;
-        padding: 2px 8px; border-radius: 6px;
-    }}
-    .score-lo {{
-        display: inline-block;
-        background: rgba(113,113,122,0.1);
-        border: 1px solid {SUBTLE};
-        color: {MUTED};
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px; font-weight: 700;
-        padding: 2px 8px; border-radius: 6px;
-    }}
-
-    /* Direction pills */
-    .dir-bull {{
-        display: inline-flex; align-items: center; gap: 4px;
-        background: rgba(34,197,94,0.08);
-        border: 1px solid rgba(34,197,94,0.25);
-        color: {GREEN}; font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-    }}
-    .dir-bear {{
-        display: inline-flex; align-items: center; gap: 4px;
-        background: rgba(239,68,68,0.08);
-        border: 1px solid rgba(239,68,68,0.25);
-        color: {RED}; font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-    }}
-    .dir-mix {{
-        display: inline-flex; align-items: center; gap: 4px;
-        background: rgba(245,158,11,0.08);
-        border: 1px solid rgba(245,158,11,0.25);
-        color: {AMBER}; font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-    }}
-
-    code {{ color: {ACCENT_L} !important; }}
-    .block-container {{ padding-top: 24px !important; }}
+    code {{ color: {CYAN} !important; }}
+    .block-container {{ padding-top: 20px !important; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -209,76 +144,82 @@ def live_badge():
     return '<span class="live-badge"><span class="live-dot"></span>LIVE</span>'
 
 
-def section_header(text: str):
-    st.markdown(f'<div class="sec-header">{text}</div>', unsafe_allow_html=True)
+def section_header(text: str, count: int | None = None):
+    badge = f'<span class="count-badge">{count}</span>' if count is not None else ""
+    st.markdown(f'<div class="sec-header"><span>{text}</span>{badge}</div>', unsafe_allow_html=True)
 
 
 def page_title(title: str, subtitle: str = ""):
-    sub = f'<p style="color:{MUTED};font-size:13px;margin-top:4px;font-weight:400;">{subtitle}</p>' if subtitle else ""
+    sub = f'<p style="color:{MUTED};font-size:12px;margin-top:3px;">{subtitle}</p>' if subtitle else ""
     st.markdown(
-        f'<h2 style="color:{TEXT};font-weight:700;margin-bottom:0;font-size:24px;">'
-        f'{title} {live_badge()}</h2>{sub}',
+        f'<h2 style="color:{TEXT};font-weight:700;margin-bottom:0;font-size:20px;">'
+        f'⚡ {title} {live_badge()}</h2>{sub}',
         unsafe_allow_html=True
     )
 
 
 def score_chip(score: float) -> str:
     if score >= 70:
-        return f'<span class="score-high">{score:.0f}</span>'
+        return (f'<span style="background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);'
+                f'color:{GREEN};font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700;'
+                f'padding:2px 8px;border-radius:4px;">{score:.0f}</span>')
     if score >= 50:
-        return f'<span class="score-med">{score:.0f}</span>'
-    return f'<span class="score-lo">{score:.0f}</span>'
+        return (f'<span style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);'
+                f'color:{AMBER};font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700;'
+                f'padding:2px 8px;border-radius:4px;">{score:.0f}</span>')
+    return (f'<span style="background:rgba(68,68,68,0.3);border:1px solid {BORDER};'
+            f'color:{MUTED};font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700;'
+            f'padding:2px 8px;border-radius:4px;">{score:.0f}</span>')
 
-# Alias used in Ticker Dive
 score_pill = score_chip
 
 
 def direction_html(d: str) -> str:
     if d == "bullish":
-        return '<span class="dir-bull">↑ Bull</span>'
+        return (f'<span style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);'
+                f'color:{GREEN};font-size:10px;font-weight:700;letter-spacing:0.5px;'
+                f'padding:2px 7px;border-radius:4px;">LONG</span>')
     if d == "bearish":
-        return '<span class="dir-bear">↓ Bear</span>'
-    return '<span class="dir-mix">◆ Watch</span>'
+        return (f'<span style="background:rgba(249,115,22,0.15);border:1px solid rgba(249,115,22,0.4);'
+                f'color:{ORANGE};font-size:10px;font-weight:700;letter-spacing:0.5px;'
+                f'padding:2px 7px;border-radius:4px;">SHORT</span>')
+    return (f'<span style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);'
+            f'color:{AMBER};font-size:10px;font-weight:700;letter-spacing:0.5px;'
+            f'padding:2px 7px;border-radius:4px;">WATCH</span>')
 
-# Alias used in Ticker Dive
 direction_badge = direction_html
 
 
 def signal_tags(sigs: list) -> str:
     return "".join(
-        f'<span style="display:inline-block;background:rgba(99,102,241,0.08);'
-        f'border:1px solid rgba(99,102,241,0.3);color:{ACCENT_L};'
-        f'font-size:11px;padding:2px 9px;border-radius:20px;margin:2px;">{s}</span>'
+        f'<span style="display:inline-block;background:rgba(34,211,238,0.08);'
+        f'border:1px solid rgba(34,211,238,0.25);color:{CYAN};'
+        f'font-size:10px;padding:2px 8px;border-radius:4px;margin:2px;">{s}</span>'
         for s in sigs
     )
 
 
 def agent_card(name: str, subtitle: str, value: str, status: str = "done") -> str:
-    color = {
-        "done":    GREEN,
-        "running": ACCENT_L,
-        "idle":    SUBTLE,
-        "warn":    AMBER,
-    }.get(status, GREEN)
-    pulse = "animation:pulse 0.9s infinite;" if status == "running" else ""
+    color = {"done": GREEN, "running": CYAN, "idle": SUBTLE, "warn": AMBER}.get(status, GREEN)
+    pulse = "animation:blink 0.8s infinite;" if status == "running" else ""
     return f"""
-    <div style="background:{CARD};border:1px solid {BORDER};border-radius:10px;
-                padding:14px 18px;margin-bottom:8px;
+    <div style="background:{CARD};border:1px solid {BORDER};border-radius:6px;
+                padding:12px 16px;margin-bottom:8px;
                 display:flex;justify-content:space-between;align-items:center;">
       <div>
         <div style="color:{TEXT};font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;
                        background:{color};{pulse}"></span>{name}
         </div>
-        <div style="color:{MUTED};font-size:11px;margin-top:3px;margin-left:16px;">{subtitle}</div>
+        <div style="color:{MUTED};font-size:11px;margin-top:3px;margin-left:15px;">{subtitle}</div>
       </div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:{color};">{value}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:{color};">{value}</div>
     </div>"""
 
 
 def status_bar(text: str):
     st.markdown(
-        f'<div style="border-top:1px solid {BORDER};padding:6px 0;'
-        f'font-size:10px;color:{MUTED};letter-spacing:1px;margin-top:16px;">{text}</div>',
+        f'<div style="border-top:1px solid {BORDER};padding:5px 0;'
+        f'font-size:10px;color:{MUTED};letter-spacing:1px;margin-top:12px;">{text}</div>',
         unsafe_allow_html=True
     )
