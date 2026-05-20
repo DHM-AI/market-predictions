@@ -19,9 +19,9 @@ st.markdown("""
 .pip-step{display:flex;align-items:center;padding:9px 16px;border-bottom:1px solid #0f0f0f;gap:12px;}
 .pip-step:last-child{border-bottom:none;}
 .pip-dot-on{width:9px;height:9px;border-radius:50%;background:#00ff88;box-shadow:0 0 5px #00ff8888;flex-shrink:0;}
-.pip-dot-pend{width:9px;height:9px;border-radius:50%;background:#1e1e1e;border:1px solid #2a2a2a;flex-shrink:0;}
+.pip-dot-pend{width:9px;height:9px;border-radius:50%;background:#2a2a2a;border:1px solid #3a3a3a;flex-shrink:0;}
 .pip-step-name{font-size:13px;color:#e8e8e8;font-weight:500;flex:0 0 90px;}
-.pip-step-sub{font-size:11px;color:#444;flex:1;}
+.pip-step-sub{font-size:11px;color:#555;flex:1;}
 .pip-bar-wrap{width:80px;height:4px;background:#1a1a1a;border-radius:2px;flex-shrink:0;}
 .pip-bar-fill{height:4px;background:#00ff88;border-radius:2px;}
 .pip-step-num{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:15px;min-width:40px;text-align:right;flex-shrink:0;}
@@ -55,7 +55,7 @@ with left_col:
     tape_ph = st.empty()
     def render_tape(data):
         if not data:
-            tape_ph.markdown('<div class="ticker-wrap"><div class="ticker-header">ACTIVE UNIVERSE</div><div style="color:#222;padding:40px 14px;font-size:12px;">Run a scan to populate</div></div>', unsafe_allow_html=True)
+            tape_ph.markdown('<div class="ticker-wrap"><div class="ticker-header">ACTIVE UNIVERSE</div><div style="color:#555;padding:40px 14px;font-size:12px;text-align:center;line-height:2;">📡 Press <strong style="color:#00ff88;">Run Scan</strong><br>to fetch S&P 500 + Futures</div></div>', unsafe_allow_html=True)
             return
         rows = ""
         for t in data[:40]:
@@ -70,13 +70,15 @@ with right_col:
 
     def render_agent(name, sub, count, running=False):
         pulse="animation:blink 0.9s infinite;" if running else ""
-        agent_ph.markdown(f'<div class="agent-main-card"><div><div class="agent-main-name"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#00ff88;margin-right:9px;{pulse}"></span>{name}</div><div class="agent-main-sub" style="margin-left:18px;">{sub}</div></div><div class="agent-main-val">{count}</div></div>', unsafe_allow_html=True)
+        dot_color="#00ff88" if (running or count not in ("—","0","")) else "#444"
+        val_color="#00ff88" if count not in ("—","") else "#444"
+        agent_ph.markdown(f'<div class="agent-main-card"><div><div class="agent-main-name"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:{dot_color};margin-right:9px;{pulse}"></span>{name}</div><div class="agent-main-sub" style="margin-left:18px;">{sub}</div></div><div class="agent-main-val" style="color:{val_color};">{count}</div></div>', unsafe_allow_html=True)
 
     def render_pipeline(counts, universe=509):
         steps=[("Scan","Fetch OHLCV · yfinance",counts.get("universe",universe),universe),("Research","Reddit · RSS · Alpha Vantage",counts.get("research"),universe),("Predict","XGBoost + blended sentiment",counts.get("scored"),universe),("Risk","Kelly Criterion · $50k bankroll",counts.get("risk"),universe),("Learn","Backfill actuals · post-mortem",counts.get("learn"),universe)]
         rows=""
         for name,sub,cnt,total in steps:
-            done=cnt is not None; dot="pip-dot-on" if done else "pip-dot-pend"; nc="color:#00ff88" if done else "color:#222"
+            done=cnt is not None; dot="pip-dot-on" if done else "pip-dot-pend"; nc="color:#00ff88" if done else "color:#444"
             cnt_str=str(cnt) if cnt is not None else "—"; bar_pct=int((cnt/total)*100) if (done and total) else 0
             rows+=f'<div class="pip-step"><div class="{dot}"></div><div class="pip-step-name">{name}</div><div class="pip-step-sub">{sub}</div><div class="pip-bar-wrap"><div class="pip-bar-fill" style="width:{bar_pct}%;"></div></div><div class="pip-step-num" style="{nc}">{cnt_str}</div></div>'
         pipeline_ph.markdown(f'<div class="pipeline-wrap"><div class="pipeline-label">Filter Pipeline</div>{rows}</div>', unsafe_allow_html=True)
@@ -85,11 +87,11 @@ with right_col:
         if n>0:
             qual_ph.markdown(f'<div class="qual-bar"><div><div class="qual-label">Qualified Setups</div><div style="color:#00ff88;font-size:11px;margin-top:2px;">Score ≥ 50 · Move target 5%+</div></div><div class="qual-count">{n} <span style="font-size:14px;font-weight:400;">found</span></div></div>', unsafe_allow_html=True)
         else:
-            qual_ph.markdown('<div style="border:1px solid #1e1e1e;border-radius:8px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;margin-top:6px;"><div style="color:#333;font-size:12px;">Qualified Setups</div><div style="color:#222;font-family:JetBrains Mono,monospace;font-size:22px;">— none yet</div></div>', unsafe_allow_html=True)
+            qual_ph.markdown('<div style="border:1px solid #1e1e1e;border-radius:8px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;margin-top:6px;"><div style="color:#555;font-size:12px;">Qualified Setups · Score ≥ 50</div><div style="color:#444;font-family:JetBrains Mono,monospace;font-size:22px;">—</div></div>', unsafe_allow_html=True)
 
     picks_df=st.session_state["last_picks"]; counts=st.session_state["pipeline_counts"]; scan_time=st.session_state["scan_time"]
     n_picks=len(picks_df) if picks_df is not None and not picks_df.empty else 0
-    render_agent("Market Scan Agent", f"Last scan: {scan_time}" if scan_time else "Ready · press Run Scan to start", str(n_picks) if n_picks else "—")
+    render_agent("Market Scan Agent", f"Last scan: {scan_time}" if scan_time else "Ready — press ▶ Run Scan to start", str(n_picks) if n_picks else "—")
     render_pipeline(counts); render_qualified(n_picks)
 
 if run_clicked:
