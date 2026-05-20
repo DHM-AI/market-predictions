@@ -228,6 +228,46 @@ except Exception:
     alpaca_ok = False
     is_live   = False
 
+# ── LOADING OVERLAY (shows when refresh is clicked) ───────────────────────────
+if st.session_state.get("_refreshing"):
+    st.markdown(f"""
+    <div style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;
+                background:rgba(3,6,13,0.90);backdrop-filter:blur(8px);
+                display:flex;flex-direction:column;align-items:center;
+                justify-content:center;gap:28px;">
+      <!-- Outer glow ring -->
+      <div style="position:relative;width:90px;height:90px;">
+        <div style="position:absolute;inset:0;border-radius:50%;
+                    border:2px solid rgba(0,212,255,0.1);"></div>
+        <div style="position:absolute;inset:0;border-radius:50%;
+                    border:3px solid transparent;
+                    border-top:3px solid {GLOW};
+                    animation:spin 0.8s linear infinite;"></div>
+        <div style="position:absolute;inset:8px;border-radius:50%;
+                    border:2px solid transparent;
+                    border-top:2px solid {GREEN};
+                    animation:spin 1.2s linear infinite reverse;"></div>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;
+                    justify-content:center;font-size:22px;">⚡</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:16px;font-weight:700;letter-spacing:3px;
+                    text-transform:uppercase;color:{GLOW};margin-bottom:8px;">
+          Refreshing
+        </div>
+        <div style="font-size:12px;color:{TEXT2};">
+          Pulling latest data from Alpaca &amp; Supabase...
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    import time
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    time.sleep(1.2)
+    st.session_state["_refreshing"] = False
+    st.rerun()
+
 n_picks = len(picks_df) if picks_df is not None and not picks_df.empty else 0
 n_auto  = int((picks_df["score"] >= 70).sum()) if picks_df is not None and not picks_df.empty and "score" in picks_df.columns else 0
 
@@ -314,10 +354,7 @@ with hc1:
         unsafe_allow_html=True)
 with hc2:
     if st.button("⟳  Refresh", use_container_width=True, key="refresh_btn"):
-        with st.spinner("Pulling fresh data..."):
-            st.cache_data.clear()
-            st.cache_resource.clear()
-            import time; time.sleep(0.8)
+        st.session_state["_refreshing"] = True
         st.rerun()
 
 # ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
