@@ -568,37 +568,75 @@ def live_alpaca():
                 st.rerun()
 
     if positions:
+        # Cross-ref trades DB for SL/TP when Alpaca legs aren't populated
+        _trade_sl_tp = {}
+        try:
+            _recent_trades = load_trades()[:30] if db_ok else []
+            for _t in _recent_trades:
+                _tk = _t.get("ticker","")
+                if _tk and _t.get("stop_loss") and _t.get("take_profit"):
+                    _trade_sl_tp[_tk] = {
+                        "stop_loss":   float(_t["stop_loss"]),
+                        "take_profit": float(_t["take_profit"]),
+                    }
+        except Exception:
+            pass
+
+        # Column header row
+        st.markdown(
+            f'<div style="display:grid;grid-template-columns:80px 55px 70px 1fr 1fr 1fr 1fr 1fr 70px;'
+            f'gap:0 16px;padding:6px 14px;border-radius:6px 6px 0 0;'
+            f'background:rgba(0,180,255,0.04);margin-bottom:1px;">'
+            + "".join(f'<span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+                      f'text-transform:uppercase;color:{TEXT3};">{h}</span>'
+                      for h in ["Ticker","Side","Shares","Entry","Current","Stop Loss","Take Profit","P&L",""])
+            + f'</div>',
+            unsafe_allow_html=True
+        )
+
         for p in positions:
             pl       = p.get("unrealized_pl", 0)
             plpct    = p.get("unrealized_pl_pct", 0)
             pc       = GREEN if pl >= 0 else RED
             arrow    = "▲" if pl >= 0 else "▼"
-            side     = str(p.get("side","long")).upper()
-            badge    = "pos-badge-l" if side=="LONG" else "pos-badge-s"
+            raw_side = str(p.get("side","")).lower()
+            is_long  = "long" in raw_side or "buy" in raw_side
+            side_lbl = "LONG" if is_long else "SHORT"
+            side_c   = f"rgba(0,255,136,0.12)" if is_long else f"rgba(255,45,120,0.12)"
+            side_bc  = f"rgba(0,255,136,0.3)"  if is_long else f"rgba(255,45,120,0.3)"
+            side_tc  = GREEN if is_long else RED
             entry    = p.get("avg_entry_price", 0)
             current  = p.get("current_price", 0)
-            sl       = p.get("stop_loss")
-            tp       = p.get("take_profit")
             ticker_p = p["ticker"]
-            sl_str   = f"${sl:.2f} ({abs((current-sl)/current*100):.1f}% away)" if sl and current else "Auto-set"
-            tp_str   = f"${tp:.2f} ({abs((tp-current)/current*100):.1f}% away)"  if tp and current else "Auto-set"
 
-            row_col, close_col = st.columns([6, 1])
+            # SL/TP — prefer Alpaca bracket legs, fall back to trades DB
+            sl = p.get("stop_loss") or _trade_sl_tp.get(ticker_p, {}).get("stop_loss")
+            tp = p.get("take_profit") or _trade_sl_tp.get(ticker_p, {}).get("take_profit")
+            sl_str = f'<span style="color:{RED};font-family:JetBrains Mono,monospace;">${sl:.2f}</span>' if sl else f'<span style="color:{TEXT3};">—</span>'
+            tp_str = f'<span style="color:{GREEN};font-family:JetBrains Mono,monospace;">${tp:.2f}</span>' if tp else f'<span style="color:{TEXT3};">—</span>'
+
+            row_col, btn_col = st.columns([9, 1])
             with row_col:
-                st.markdown(f"""
-<div class="pos-row" style="grid-template-columns:70px 65px 1fr 1fr 1fr 1fr 1fr 1fr;">
-  <div class="pos-ticker">{ticker_p}</div>
-  <div><span class="{badge}">{side}</span></div>
-  <div class="pos-col"><span class="pos-lbl">Shares</span><span class="pos-val">{p['qty']:.0f}</span></div>
-  <div class="pos-col"><span class="pos-lbl">Entry</span><span class="pos-val">${entry:.2f}</span></div>
-  <div class="pos-col"><span class="pos-lbl">Current</span><span class="pos-val">${current:.2f}</span></div>
-  <div class="pos-col"><span class="pos-lbl">Stop Loss</span><span class="pos-val" style="color:{RED};">{sl_str}</span></div>
-  <div class="pos-col"><span class="pos-lbl">Take Profit</span><span class="pos-val" style="color:{GREEN};">{tp_str}</span></div>
-  <div class="pos-col"><span class="pos-lbl">P&amp;L</span><span class="pos-val" style="color:{pc};">{arrow} ${abs(pl):,.2f} ({abs(plpct):.1f}%)</span></div>
-</div>""", unsafe_allow_html=True)
-            with close_col:
-                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-                if st.button(f"✗ Close", key=f"close_{ticker_p}", use_container_width=True):
+                st.markdown(
+                    f'<div style="display:grid;grid-template-columns:80px 55px 70px 1fr 1fr 1fr 1fr 1fr;'
+                    f'gap:0 16px;align-items:center;padding:10px 14px;'
+                    f'background:{SURF};border:1px solid rgba(0,180,255,0.08);'
+                    f'border-radius:6px;margin-bottom:4px;transition:border-color 0.15s;">'
+                    f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;color:{GLOW};">{ticker_p}</span>'
+                    f'<span style="background:{side_c};border:1px solid {side_bc};color:{side_tc};'
+                    f'font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 6px;border-radius:3px;">{side_lbl}</span>'
+                    f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;color:{TEXT};">{p["qty"]:.0f}</span>'
+                    f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;color:{TEXT2};">${entry:.2f}</span>'
+                    f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;color:{TEXT};">${current:.2f}</span>'
+                    f'<span>{sl_str}</span>'
+                    f'<span>{tp_str}</span>'
+                    f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:{pc};">'
+                    f'{arrow} ${abs(pl):,.2f} <span style="font-size:11px;font-weight:400;">({abs(plpct):.1f}%)</span></span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+            with btn_col:
+                if st.button("✗ Close", key=f"close_{ticker_p}", use_container_width=True):
                     st.session_state["confirm_close"] = ticker_p
                     st.rerun()
     elif alpaca_ok:
