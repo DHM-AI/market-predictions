@@ -6,6 +6,7 @@ on:
     # Currently EDT (UTC-4):
     - cron: '0 11 * * 1-5'    #  7:00 AM ET — pre-market open
     - cron: '0 13 * * 1-5'    #  9:00 AM ET — market just opened
+    - cron: '30 13 * * 1-5'   #  9:30 AM ET — exact market open (NEW)
     - cron: '30 14 * * 1-5'   # 10:30 AM ET — mid-morning momentum
     - cron: '0 16 * * 1-5'    # 12:00 PM ET — midday
     - cron: '0 18 * * 1-5'    #  2:00 PM ET — early afternoon
