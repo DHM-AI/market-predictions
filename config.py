@@ -25,10 +25,36 @@ ALPACA_LIVE_MODE  = os.getenv("ALPACA_LIVE_MODE", "false").lower() == "true"
 FUTURES = ["ES=F", "NQ=F", "RTY=F", "CL=F", "GC=F", "ZB=F"]
 
 # ── Watchlist — always scanned even if not in S&P 500 ─────────────────────────
-# Add any ticker here to force it into every scan.
+# These are scanned on every run regardless of index membership.
+# S&P 500 stocks are included automatically — list only extras here.
 WATCHLIST = [
-    "AAL",   # American Airlines — removed from S&P 500 in 2020, still high volume
+    # ── Airlines (high volume, volatile, often not in S&P 500) ────────────────
+    "AAL",   # American Airlines  — removed from S&P 500 in 2020
+    "UAL",   # United Airlines    — may rotate in/out of S&P 500
+    "DAL",   # Delta Air Lines    — may rotate in/out of S&P 500
+    "LUV",   # Southwest Airlines — may rotate in/out of S&P 500
+    "JBLU",  # JetBlue            — not in S&P 500
+
+    # ── High-profile tech / growth not always in S&P 500 ─────────────────────
+    "TSLA",  # Tesla              — in S&P 500 (deduped automatically if so)
+    "RIVN",  # Rivian             — EV, not in S&P 500
+    "LCID",  # Lucid Motors       — EV, not in S&P 500
+    "HOOD",  # Robinhood          — fintech, not in S&P 500
+    "SOFI",  # SoFi Technologies  — fintech, not in S&P 500
+    "RBLX",  # Roblox             — gaming/metaverse
+    "COIN",  # Coinbase           — crypto exchange
+    "PLTR",  # Palantir           — AI/data (may be in S&P 500)
+    "SNOW",  # Snowflake          — cloud data
+    "PATH",  # UiPath             — automation/AI
+
+    # ── Recent high-volume IPOs (auto-updated via get_recent_ipos()) ──────────
+    # Dynamic IPO list is appended at runtime — see universe.py
 ]
+
+# How many months back to look for recent IPOs
+IPO_LOOKBACK_MONTHS = 12
+# Min avg daily volume for an IPO to be worth scanning
+IPO_MIN_VOLUME = 1_000_000
 
 # ── Signal thresholds ─────────────────────────────────────────────────────────
 BB_SQUEEZE_PERCENTILE  = 10
