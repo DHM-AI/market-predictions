@@ -496,19 +496,10 @@ def live_alpaca():
     st.session_state["_live_positions"]      = len(positions)
     st.session_state["_live_positions_data"] = positions
 
-    # Realized P&L for goal bar — computed fresh every 30s
-    _realized_goal = 0.0
-    try:
-        if alpaca_ok:
-            from execution.alpaca import get_closed_trade_pnl
-            from datetime import date as _d
-            _today_str = _d.today().isoformat()
-            for _cp in get_closed_trade_pnl(days=1):
-                if _cp.get("closed_at","")[:10] == _today_str:
-                    _realized_goal += _cp["realized_pnl"]
-    except Exception:
-        pass
-    st.session_state["_realized_pl"] = _realized_goal
+    # Store realized P&L for goal bar (equity - last_equity - unrealized = realized)
+    _last_eq   = acct.get("last_equity", portfolio)
+    _daily_pnl = portfolio - _last_eq
+    st.session_state["_realized_pl"] = _daily_pnl - total_pl
 
     # ── Metric strip ──────────────────────────────────────────────────────────
     def mc(label, val, sub, color=TEXT3, tip=""):
@@ -521,28 +512,15 @@ def live_alpaca():
             f'{tip_html}</div>'
         )
 
-    # Realized P&L from closed trades today
-    _realized_today = 0.0
-    _closed_count   = 0
-    try:
-        if alpaca_ok:
-            from execution.alpaca import get_closed_trade_pnl
-            from datetime import date as _date
-            _today_str = _date.today().isoformat()
-            for cp in get_closed_trade_pnl(days=1):
-                if cp.get("closed_at", "")[:10] == _today_str:
-                    _realized_today += cp["realized_pnl"]
-                    _closed_count   += 1
-    except Exception:
-        pass
-
-    # Total P&L today = realized (locked in) + unrealized (floating)
-    _total_today    = _realized_today + total_pl
+    # True daily P&L = Alpaca equity vs yesterday's close (includes everything)
+    _last_equity    = acct.get("last_equity", portfolio)
+    _total_today    = portfolio - _last_equity          # actual account gain today
+    _unrealized_pl  = total_pl                          # open positions floating
+    _realized_today = _total_today - _unrealized_pl     # locked in (closed trades)
     _total_sign     = "+" if _total_today >= 0 else ""
     _total_color    = GREEN if _total_today > 0 else RED if _total_today < 0 else TEXT2
 
-    pl_sign    = "+" if total_pl >= 0 else ""
-    _rl_sub    = f"🔒 ${_realized_today:+,.0f} closed · 📈 ${total_pl:+,.0f} open"
+    _rl_sub    = f"🔒 ${_realized_today:+,.0f} closed · 📈 ${_unrealized_pl:+,.0f} open"
 
     st.markdown(
         f'<div class="metrics-row" style="grid-template-columns:repeat(6,1fr);">'
