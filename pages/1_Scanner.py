@@ -518,6 +518,7 @@ def live_alpaca():
     st.session_state["_live_pl"]             = total_pl
     st.session_state["_live_positions"]      = len(positions)
     st.session_state["_live_positions_data"] = positions
+    st.session_state["_portfolio_value"]     = portfolio  # for goal bar target calc
 
     # Store realized P&L for goal bar (equity - last_equity - unrealized = realized)
     _last_eq   = acct.get("last_equity", portfolio)
@@ -1034,7 +1035,9 @@ def live_goal_bar():
     days_left      = days_in_month - day_of_month
     trading_days   = 21
     trading_day    = round(day_of_month / days_in_month * trading_days)
-    target_dollars = BANKROLL * MONTHLY_TARGET_PCT
+    # 10% of current account value — not the fixed starting bankroll
+    portfolio_val  = st.session_state.get("_portfolio_value", BANKROLL)
+    target_dollars = portfolio_val * MONTHLY_TARGET_PCT
 
     # Read fresh values set by live_alpaca() fragment (both run every 30s)
     realized_pl   = st.session_state.get("_realized_pl", 0.0)

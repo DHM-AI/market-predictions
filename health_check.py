@@ -303,8 +303,8 @@ try:
     today_dt      = datetime.today()
     days_in_month = monthrange(today_dt.year, today_dt.month)[1]
     day_of_month  = today_dt.day
-    target        = BANKROLL * MONTHLY_TARGET_PCT
     portfolio_val = alpaca_acct.get("portfolio_value", BANKROLL)
+    target        = portfolio_val * MONTHLY_TARGET_PCT   # 10% of current account value
     total_pl_pos  = sum(p.get("unrealized_pl", 0) for p in alpaca_positions)
 
     # Progress estimate
