@@ -217,30 +217,47 @@ def get_positions() -> list[dict]:
         orders    = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
         sl_tp_map = {}  # ticker → {stop_loss, take_profit}
         for o in orders:
-            sym = o.symbol
-            if hasattr(o, "legs") and o.legs:
-                for leg in o.legs:
-                    if hasattr(leg, "stop_price") and leg.stop_price:
-                        sl_tp_map.setdefault(sym, {})["stop_loss"] = float(leg.stop_price)
-                    if hasattr(leg, "limit_price") and leg.limit_price and leg.side:
-                        # Take profit leg has opposite side
-                        sl_tp_map.setdefault(sym, {})["take_profit"] = float(leg.limit_price)
+            sym   = o.symbol
+            otype = str(getattr(o, "type", "")).lower()
+            # After bracket fills, child orders appear as standalone open orders:
+            # TP leg → OrderType.LIMIT  (limit_price set)
+            # SL leg → OrderType.STOP   (stop_price set)
+            if "limit" in otype and not "stop" in otype:
+                lp = getattr(o, "limit_price", None)
+                if lp:
+                    sl_tp_map.setdefault(sym, {})["take_profit"] = float(lp)
+            if "stop" in otype:
+                sp = getattr(o, "stop_price", None)
+                if sp:
+                    sl_tp_map.setdefault(sym, {})["stop_loss"] = float(sp)
+            # Also check legs (for unfilled bracket parent orders)
+            for leg in (getattr(o, "legs", None) or []):
+                if getattr(leg, "stop_price", None):
+                    sl_tp_map.setdefault(sym, {})["stop_loss"] = float(leg.stop_price)
+                if getattr(leg, "limit_price", None):
+                    sl_tp_map.setdefault(sym, {})["take_profit"] = float(leg.limit_price)
 
-        return [
-            {
-                "ticker":           p.symbol,
-                "qty":              float(p.qty),
-                "market_value":     float(p.market_value),
-                "unrealized_pl":    float(p.unrealized_pl),
-                "unrealized_pl_pct":float(p.unrealized_plpc) * 100,
-                "side":             str(p.side),
-                "avg_entry_price":  float(p.avg_entry_price),
-                "current_price":    float(p.current_price),
-                "stop_loss":        sl_tp_map.get(p.symbol, {}).get("stop_loss"),
-                "take_profit":      sl_tp_map.get(p.symbol, {}).get("take_profit"),
-            }
-            for p in positions
-        ]
+        result = []
+        for p in positions:
+            entry = float(p.avg_entry_price)
+            sym   = p.symbol
+            known = sl_tp_map.get(sym, {})
+            # Fall back to computing from config constants when Alpaca doesn't expose the leg
+            sl = known.get("stop_loss")  or round(entry * (1 - KELLY_LOSS_PCT), 2)
+            tp = known.get("take_profit") or round(entry * (1 + MOVE_TARGET_PCT), 2)
+            result.append({
+                "ticker":            sym,
+                "qty":               float(p.qty),
+                "market_value":      float(p.market_value),
+                "unrealized_pl":     float(p.unrealized_pl),
+                "unrealized_pl_pct": float(p.unrealized_plpc) * 100,
+                "side":              str(p.side),
+                "avg_entry_price":   entry,
+                "current_price":     float(p.current_price),
+                "stop_loss":         sl,
+                "take_profit":       tp,
+            })
+        return result
     except Exception as e:
         print(f"[alpaca] get_positions error: {e}")
         return []

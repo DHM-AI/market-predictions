@@ -186,9 +186,18 @@ def load_learnings() -> list[dict]:
 
 # ── Trades ────────────────────────────────────────────────────────────────────
 
+_TRADE_COLS = {
+    # ── Existing columns ────────────────────────────────────
+    "order_id", "ticker", "side", "dollar_amount",
+    "mode", "status", "reason", "timestamp",
+    # ── Add with ALTER TABLE below, then uncomment ──────────
+    # "qty", "entry_price", "stop_loss", "take_profit",
+}
+
 def save_trade(record: dict) -> None:
     """Save an Alpaca trade execution record."""
-    _client().table("trades").upsert(record, on_conflict="order_id").execute()
+    clean = {k: _sanitize(v) for k, v in record.items() if k in _TRADE_COLS}
+    _client().table("trades").upsert(clean, on_conflict="order_id").execute()
 
 
 def load_trades() -> list[dict]:
