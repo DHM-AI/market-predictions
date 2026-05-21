@@ -382,6 +382,80 @@ def close_position(ticker: str) -> dict:
         return {"status": "error", "reason": str(e), "ticker": ticker}
 
 
+def tighten_stop(ticker: str, stop_pct: float = 0.015) -> dict:
+    """
+    Cancel existing stop loss for ticker and replace with a tighter one.
+    stop_pct: how far below current price to set the new stop (default 1.5%).
+    Used by sentiment_guard when a position's sentiment turns negative.
+    """
+    if not is_configured():
+        return {"status": "skipped"}
+    try:
+        from alpaca.trading.requests import (GetOrdersRequest, StopOrderRequest)
+        from alpaca.trading.enums import (QueryOrderStatus, OrderSide, TimeInForce)
+
+        client = _get_client()
+
+        # Get current price
+        price = get_current_price(ticker)
+        if not price:
+            return {"status": "error", "reason": "Could not fetch price"}
+
+        # Cancel existing stop orders for this ticker
+        open_orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        cancelled = 0
+        qty = 0
+        for o in open_orders:
+            if o.symbol != ticker:
+                continue
+            otype = str(getattr(o, "type", "")).lower()
+            if "stop" in otype and "limit" not in otype and "trailing" not in otype:
+                try:
+                    client.cancel_order_by_id(str(o.id))
+                    cancelled += 1
+                    if not qty and o.qty:
+                        qty = float(o.qty)
+                except Exception:
+                    pass
+
+        if not qty:
+            # Try to get qty from position
+            positions = get_positions()
+            for p in positions:
+                if p["ticker"] == ticker:
+                    qty = p["qty"]
+                    break
+
+        if not qty:
+            return {"status": "error", "reason": "Could not determine qty"}
+
+        # Place tighter stop
+        new_stop = round(price * (1 - stop_pct), 2)
+        from alpaca.trading.requests import MarketOrderRequest
+        stop_req = StopOrderRequest(
+            symbol        = ticker,
+            qty           = qty,
+            side          = OrderSide.SELL,
+            time_in_force = TimeInForce.GTC,
+            stop_price    = new_stop,
+        )
+        order = client.submit_order(stop_req)
+        mode  = "LIVE" if is_live_mode() else "PAPER"
+        print(f"[guard] [{mode}] {ticker} stop tightened → ${new_stop:.2f} "
+              f"({stop_pct*100:.1f}% below ${price:.2f})")
+        return {
+            "status":    "tightened",
+            "ticker":    ticker,
+            "new_stop":  new_stop,
+            "price":     price,
+            "stop_pct":  stop_pct,
+            "order_id":  str(order.id),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"status": "error", "reason": str(e), "ticker": ticker}
+
+
 def trail_positions(
     trigger_pct: float | None = None,
     trail_pct:   float | None = None,

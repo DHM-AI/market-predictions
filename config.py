@@ -102,6 +102,14 @@ KELLY_FRACTION    = 0.5    # use half-Kelly for safety
 MAX_POSITION_PCT  = 0.15   # max 15% of bankroll per trade (raised to support 10%/mo goal)
 DAILY_LOSS_LIMIT_PCT = 0.05  # halt trading if down 5% in a day
 
+# ── Sentiment Guard ───────────────────────────────────────────────────────────
+# Monitors open positions for sentiment reversal and takes protective action.
+# Scores range from -1.0 (very bearish) to +1.0 (very bullish).
+GUARD_WARN_THRESHOLD    = -0.15  # LONG:  alert when sentiment drops below this
+GUARD_TIGHTEN_THRESHOLD = -0.35  # LONG:  tighten stop to 1.5% when below this
+GUARD_CLOSE_THRESHOLD   = -0.60  # LONG:  close position when sentiment this bad
+# (reversed for SHORT positions)
+
 # ── Trailing stop ──────────────────────────────────────────────────────────────
 # When a position gains TRAIL_TRIGGER_PCT, cancel the fixed SL and replace
 # with an Alpaca native trailing stop that follows price up automatically.
