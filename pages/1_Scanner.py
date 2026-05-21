@@ -607,39 +607,65 @@ def live_alpaca():
                 st.rerun()
 
     if positions:
-        # Cross-ref trades DB for SL/TP and entry timestamp
-        _trade_sl_tp = {}
-        # Detect which tickers have an active trailing stop (from Alpaca open orders)
+        _trade_sl_tp      = {}
         _trailing_tickers = set()
-        try:
-            from datetime import date as _date
-            _today_str = _date.today().isoformat()
-            _recent_trades = load_trades()[:50] if db_ok else []
-            for _t in _recent_trades:
-                _tk = _t.get("ticker","")
-                if not _tk:
-                    continue
-                _trade_sl_tp.setdefault(_tk, {})
-                if _t.get("stop_loss") and _t.get("take_profit"):
-                    _trade_sl_tp[_tk]["stop_loss"]   = float(_t["stop_loss"])
-                    _trade_sl_tp[_tk]["take_profit"]  = float(_t["take_profit"])
-                # Capture the most recent entry timestamp for this ticker
-                if _t.get("timestamp") and "entry_ts" not in _trade_sl_tp[_tk]:
-                    _trade_sl_tp[_tk]["entry_ts"] = str(_t["timestamp"])[:10]  # YYYY-MM-DD
-        except Exception:
-            pass
+        _today_str        = ""
 
-        # Detect trailing stops from Alpaca open orders
         try:
+            from datetime import date as _date, datetime as _dt, timezone as _tz, timedelta as _td
+            _today_str = _date.today().isoformat()
+
             if alpaca_ok:
                 from execution.alpaca import _get_client as _aclient
                 from alpaca.trading.requests import GetOrdersRequest
                 from alpaca.trading.enums import QueryOrderStatus
-                _open_ords = _aclient().get_orders(
+
+                _client_inst = _aclient()
+
+                # ── Entry dates: read directly from Alpaca filled buy orders ──
+                # Source of truth — avoids stale Supabase trades table entries
+                _after = (_dt.now(_tz.utc) - _td(days=60)).strftime("%Y-%m-%dT00:00:00Z")
+                _all_orders = _client_inst.get_orders(
+                    GetOrdersRequest(status=QueryOrderStatus.ALL,
+                                     after=_after, limit=500))
+                for _o in _all_orders:
+                    if "buy" not in str(getattr(_o, "side", "")).lower():
+                        continue
+                    if str(getattr(_o, "status", "")) not in ("filled", "partially_filled"):
+                        continue
+                    if not _o.filled_at:
+                        continue
+                    _sym = _o.symbol
+                    _filled_date = str(_o.filled_at)[:10]  # YYYY-MM-DD
+                    # Keep the most recent fill per ticker
+                    if ("entry_ts" not in _trade_sl_tp.get(_sym, {})
+                            or _filled_date > _trade_sl_tp[_sym].get("entry_ts", "")):
+                        _trade_sl_tp.setdefault(_sym, {})["entry_ts"] = _filled_date
+
+                # ── Trailing stops: from open orders ──
+                _open_ords = _client_inst.get_orders(
                     GetOrdersRequest(status=QueryOrderStatus.OPEN))
                 for _o in _open_ords:
-                    if "trailing" in str(getattr(_o, "type", "")).lower():
+                    otype = str(getattr(_o, "type", "")).lower()
+                    if "trailing" in otype:
                         _trailing_tickers.add(_o.symbol)
+
+        except Exception:
+            pass
+
+        # ── SL/TP fallback from Supabase trades table ──
+        try:
+            _recent_trades = load_trades()[:50] if db_ok else []
+            for _t in _recent_trades:
+                _tk = _t.get("ticker", "")
+                if not _tk:
+                    continue
+                _trade_sl_tp.setdefault(_tk, {})
+                if _t.get("stop_loss") and _t.get("take_profit"):
+                    if "stop_loss" not in _trade_sl_tp[_tk]:
+                        _trade_sl_tp[_tk]["stop_loss"]  = float(_t["stop_loss"])
+                    if "take_profit" not in _trade_sl_tp[_tk]:
+                        _trade_sl_tp[_tk]["take_profit"] = float(_t["take_profit"])
         except Exception:
             pass
 
