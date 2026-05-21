@@ -189,21 +189,46 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
 
 def _place_simple_order(ticker: str, dollar_amount: float, side: str,
                          mode: str, reason: str) -> dict:
-    """Fallback: plain market order without bracket (futures, etc.)"""
+    """Fallback: plain market order without bracket (futures, etc.)
+
+    For SELL (short) orders we always use qty — Alpaca rejects notional shorts.
+    For BUY orders we prefer notional, fall back to qty if needed.
+    """
     try:
         from alpaca.trading.requests import MarketOrderRequest
         from alpaca.trading.enums import OrderSide, TimeInForce
-        client    = _get_client()
-        order_req = MarketOrderRequest(
-            symbol        = ticker,
-            notional      = round(dollar_amount, 2),
-            side          = OrderSide.BUY if side == "buy" else OrderSide.SELL,
-            time_in_force = TimeInForce.DAY,
-        )
-        order = client.submit_order(order_req)
+        client     = _get_client()
+        order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
+
+        # Shorts must use qty (whole shares) — Alpaca forbids fractional shorts
+        if side == "sell":
+            price = get_current_price(ticker)
+            if not price or price <= 0:
+                return {"status": "error",
+                        "reason": f"Could not fetch price for {ticker} (short order)",
+                        "ticker": ticker}
+            qty       = max(1, round(dollar_amount / price))
+            order_req = MarketOrderRequest(
+                symbol        = ticker,
+                qty           = qty,
+                side          = order_side,
+                time_in_force = TimeInForce.DAY,
+            )
+        else:
+            qty       = None
+            order_req = MarketOrderRequest(
+                symbol        = ticker,
+                notional      = round(dollar_amount, 2),
+                side          = order_side,
+                time_in_force = TimeInForce.DAY,
+            )
+
+        order  = client.submit_order(order_req)
+        actual_qty = qty or round(dollar_amount / (get_current_price(ticker) or 1))
         result = {
             "status": "submitted", "order_id": str(order.id),
             "ticker": ticker, "side": side,
+            "qty": actual_qty,
             "dollar_amount": dollar_amount, "mode": mode,
             "timestamp": datetime.now().isoformat(), "reason": reason,
         }
