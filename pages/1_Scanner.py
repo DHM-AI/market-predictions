@@ -507,16 +507,38 @@ def live_alpaca():
             f'{tip_html}</div>'
         )
 
-    pl_sign = "+" if total_pl >= 0 else ""
+    # Realized P&L — sum of today's closed bracket trades
+    _realized_today = 0.0
+    _closed_count   = 0
+    try:
+        if alpaca_ok:
+            from execution.alpaca import get_closed_trade_pnl
+            from datetime import date
+            _today_str = date.today().isoformat()
+            for cp in get_closed_trade_pnl(days=1):
+                if cp.get("closed_at", "")[:10] == _today_str:
+                    _realized_today += cp["realized_pnl"]
+                    _closed_count   += 1
+    except Exception:
+        pass
+
+    pl_sign    = "+" if total_pl >= 0 else ""
+    rl_sign    = "+" if _realized_today >= 0 else ""
+    rl_color   = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
+
     st.markdown(
-        f'<div class="metrics-row">'
-        + mc("Portfolio Value",  f"${portfolio:,.0f}",          "Total equity",
+        f'<div class="metrics-row" style="grid-template-columns:repeat(7,1fr);">'
+        + mc("Portfolio Value",  f"${portfolio:,.0f}",           "Total equity",
              GLOW, "Total Alpaca account value — positions + cash.")
-        + mc("Unrealized P&L",  f"{pl_sign}${total_pl:,.2f}",  f"{len(positions)} open",
+        + mc("Realized P&L Today", f"{rl_sign}${abs(_realized_today):,.2f}",
+             f"{_closed_count} trade{'s' if _closed_count!=1 else ''} closed",
+             rl_color if _realized_today != 0 else TEXT2,
+             "Money actually banked today from closed bracket orders (stop loss or take profit hit).")
+        + mc("Open P&L",        f"{pl_sign}${total_pl:,.2f}",   f"{len(positions)} positions live",
              pl_color if total_pl != 0 else TEXT2,
-             "Live profit/loss on open positions. Not realized until closed.")
-        + mc("Buying Power",    f"${buying_power:,.0f}",        "Available now",
-             TEXT, "Cash you can deploy into new positions right now.")
+             "Unrealized profit/loss on open positions. Fluctuates until positions close.")
+        + mc("Buying Power",    f"${buying_power:,.0f}",         "Available now",
+             TEXT, "Cash available for new positions right now.")
         + mc("AI Setups Today", str(_n_picks) if _n_picks else "—", "Score ≥ 50",
              GREEN if _n_picks else TEXT2,
              "Tickers flagged today. Agent scans 7× daily: 7AM · 9AM · 10:30AM · 12PM · 2PM · 3:30PM · 4PM ET.")
@@ -527,7 +549,7 @@ def live_alpaca():
              _market_clock(),
              _market_status(),
              GREEN if _is_market_open() else RED,
-             "Market time from Alpaca. GREEN = market open, AMBER = pre/after hours, shows if trading is live.")
+             "Market time from Alpaca. GREEN = market open, AMBER = pre/after hours.")
         + f'</div>',
         unsafe_allow_html=True)
 
@@ -827,83 +849,83 @@ if picks_df is not None and not picks_df.empty:
 # ── TRADE HISTORY ──────────────────────────────────────────────────────────────
 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 st.markdown(
-    f'<div class="sec">Full Trade History <span class="sec-n">{len(trades)} records</span></div>',
+    f'<div class="sec">Closed Trade History <span class="sec-n">{len([t for t in trades if t.get("ticker","") not in {p["ticker"] for p in (st.session_state.get("_live_positions_data") or [])}])} records</span></div>',
     unsafe_allow_html=True)
 
-if trades:
-    # Build P&L lookups
-    _open_pl   = {p["ticker"]: p for p in (st.session_state.get("_live_positions_data") or [])}
-    _closed_pl = {}
-    try:
-        if alpaca_ok:
-            from execution.alpaca import get_closed_trade_pnl
-            for cp in get_closed_trade_pnl(days=90):
-                _closed_pl[cp["ticker"]] = cp
-    except Exception:
-        pass
+# Build P&L maps for trade history
+_open_pl   = {p["ticker"]: p for p in (st.session_state.get("_live_positions_data") or [])}
+_closed_pl = {}
+try:
+    if alpaca_ok:
+        from execution.alpaca import get_closed_trade_pnl
+        for cp in get_closed_trade_pnl(days=90):
+            _closed_pl[cp["ticker"]] = cp
+except Exception:
+    pass
 
-    hdr = (f'<div class="hist-hdr" style="grid-template-columns:100px 70px 55px 80px 110px 1fr;">'
-           f'<span class="hist-lbl">Time</span>'
-           f'<span class="hist-lbl">Ticker</span>'
-           f'<span class="hist-lbl">Side</span>'
-           f'<span class="hist-lbl">Amount</span>'
-           f'<span class="hist-lbl">P&L</span>'
-           f'<span class="hist-lbl">Status / Reason</span>'
-           f'</div>')
+# Trade history = only CLOSED trades (open ones are shown in Open Positions above)
+closed_trades = [t for t in trades if t.get("ticker","") not in _open_pl]
+
+if not closed_trades:
+    st.markdown(
+        f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.08);border-radius:8px;'
+        f'padding:28px;text-align:center;">'
+        f'<div style="color:{TEXT2};font-size:13px;font-weight:600;margin-bottom:6px;">No closed trades yet</div>'
+        f'<div style="color:{TEXT3};font-size:12px;">Positions appear here after hitting take profit (+7%) or stop loss (-3%)</div>'
+        f'</div>',
+        unsafe_allow_html=True)
+else:
+    _grid = "100px 70px 55px 80px 120px 1fr"
+    hdr_html = (
+        f'<div class="hist-hdr" style="grid-template-columns:{_grid};">'
+        f'<span class="hist-lbl">Closed</span>'
+        f'<span class="hist-lbl">Ticker</span>'
+        f'<span class="hist-lbl">Side</span>'
+        f'<span class="hist-lbl">Invested</span>'
+        f'<span class="hist-lbl">Realized P&L</span>'
+        f'<span class="hist-lbl">Outcome</span>'
+        f'</div>'
+    )
     rows_html = ""
-    for t in trades:
+    for t in closed_trades:
         side    = t.get("side","")
-        c       = GREEN if side=="buy" else RED
+        sc      = GREEN if side=="buy" else RED
         ts      = str(t.get("timestamp",""))[:16].replace("T"," ")
         amt     = float(t.get("dollar_amount",0))
         ticker_ = t.get("ticker","")
 
-        # P&L column
-        if ticker_ in _open_pl:
-            upl  = _open_pl[ticker_]["unrealized_pl"]
-            upct = _open_pl[ticker_]["unrealized_pl_pct"]
-            pc   = GREEN if upl >= 0 else RED
-            arr  = "▲" if upl >= 0 else "▼"
-            pnl_html = f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;font-size:12px;">{arr} ${abs(upl):,.2f} ({upct:+.1f}%)</span>'
-            status_html = f'<span style="color:{GLOW};font-size:9px;font-weight:800;letter-spacing:1px;">● LIVE</span>'
-        elif ticker_ in _closed_pl:
-            cp   = _closed_pl[ticker_]
-            rpl  = cp["realized_pnl"]
-            rpct = cp["realized_pnl_pct"]
-            pc   = GREEN if rpl >= 0 else RED
-            arr  = "▲" if rpl >= 0 else "▼"
-            pnl_html = f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;font-size:12px;">{arr} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>'
-            outcome  = cp.get("outcome","closed")
-            olabel   = "🎯 TP HIT" if outcome=="tp_hit" else "🛑 SL HIT" if outcome=="sl_hit" else "CLOSED"
+        if ticker_ in _closed_pl:
+            cp      = _closed_pl[ticker_]
+            rpl     = cp["realized_pnl"]
+            rpct    = cp["realized_pnl_pct"]
+            pc      = GREEN if rpl >= 0 else RED
+            arr     = "▲" if rpl >= 0 else "▼"
+            outcome = cp.get("outcome","closed")
+            pnl_html = (f'<span style="color:{pc};font-family:JetBrains Mono,monospace;'
+                        f'font-weight:700;font-size:13px;">{arr} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>')
+            olabel   = "🎯 TAKE PROFIT" if outcome=="tp_hit" else "🛑 STOP LOSS" if outcome=="sl_hit" else "CLOSED"
             oc       = GREEN if outcome=="tp_hit" else RED if outcome=="sl_hit" else TEXT3
-            status_html = f'<span style="color:{oc};font-size:9px;font-weight:800;letter-spacing:1px;">{olabel}</span>'
+            out_html = f'<span style="color:{oc};font-size:10px;font-weight:800;">{olabel}</span>'
         else:
-            pnl_html    = f'<span style="color:{TEXT3};font-size:11px;">Pending</span>'
-            reason_trunc = str(t.get("reason","—"))[:60]
-            status_html = f'<span style="font-size:11px;color:{TEXT2};">{reason_trunc}</span>'
+            pnl_html = f'<span style="color:{TEXT3};">—</span>'
+            out_html = f'<span style="color:{TEXT3};font-size:11px;">Closed</span>'
 
         rows_html += (
-            f'<div class="hist-row" style="grid-template-columns:100px 70px 55px 80px 110px 1fr;">'
+            f'<div class="hist-row" style="grid-template-columns:{_grid};">'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT3};">{ts}</span>'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:{GLOW};">{ticker_}</span>'
             f'<span style="background:{"rgba(0,255,136,0.1)" if side=="buy" else "rgba(255,45,120,0.1)"};'
             f'border:1px solid {"rgba(0,255,136,0.3)" if side=="buy" else "rgba(255,45,120,0.3)"};'
-            f'color:{c};font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 7px;border-radius:3px;">'
+            f'color:{sc};font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 7px;border-radius:3px;">'
             f'{side.upper()}</span>'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:{c};">${amt:,.0f}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;color:{TEXT2};">${amt:,.0f}</span>'
             f'<span>{pnl_html}</span>'
-            f'<span>{status_html}</span>'
+            f'<span>{out_html}</span>'
             f'</div>'
         )
     st.markdown(
         f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;overflow:hidden;">'
-        f'{hdr}{rows_html}</div>',
-        unsafe_allow_html=True)
-else:
-    st.markdown(
-        f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;'
-        f'padding:24px;text-align:center;color:{TEXT3};font-size:12px;">'
-        f'No trade history yet. Auto-executed trades will appear here.</div>',
+        f'{hdr_html}{rows_html}</div>',
         unsafe_allow_html=True)
 
 # ── MONTHLY GOAL BAR (bottom of page) ─────────────────────────────────────────
