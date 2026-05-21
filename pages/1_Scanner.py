@@ -440,8 +440,8 @@ def _next_scan_label() -> str:
         ET = ZoneInfo("America/New_York")
         now = datetime.now(ET)
 
-        # All 7 daily scan times (hour, minute) in ET
-        SCAN_TIMES = [(7,0),(9,0),(10,30),(12,0),(14,0),(15,30),(16,0)]
+        # All 12 daily scan times (hour, minute) in ET
+        SCAN_TIMES = [(7,0),(8,0),(9,0),(9,30),(10,30),(11,0),(12,0),(13,0),(14,0),(15,0),(15,30),(16,0)]
 
         # Build today's scan datetimes
         today_scans = [

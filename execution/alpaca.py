@@ -73,16 +73,17 @@ def get_current_price(ticker: str) -> float | None:
 def _check_daily_loss_limit() -> bool:
     """Returns True if safe to trade, False if daily loss limit breached."""
     try:
-        acct       = _get_client().get_account()
-        equity     = float(acct.equity)
-        last_equity= float(acct.last_equity)
-        daily_loss = (equity - last_equity) / last_equity
+        acct        = _get_client().get_account()
+        equity      = float(acct.equity)
+        last_equity = float(acct.last_equity)
+        daily_loss  = (equity - last_equity) / last_equity
         if daily_loss < -DAILY_LOSS_LIMIT_PCT:
             print(f"[alpaca] ⚠ Daily loss limit breached ({daily_loss:.1%}). Halting trades.")
             return False
         return True
-    except Exception:
-        return True  # fail open
+    except Exception as e:
+        print(f"[alpaca] ⚠ Could not check daily loss limit ({e}) — blocking trades for safety.")
+        return False  # fail closed — never trade blind
 
 
 def place_order(ticker: str, dollar_amount: float, direction: str,
@@ -264,7 +265,7 @@ def get_positions() -> list[dict]:
                 lp = getattr(o, "limit_price", None)
                 if lp:
                     sl_tp_map.setdefault(sym, {})["take_profit"] = float(lp)
-            if "stop" in otype:
+            if "stop" in otype and "trailing" not in otype:  # exclude trailing stops — no static price
                 sp = getattr(o, "stop_price", None)
                 if sp:
                     sl_tp_map.setdefault(sym, {})["stop_loss"] = float(sp)
@@ -563,12 +564,14 @@ def trail_positions(
                         print(f"[trail] Could not cancel SL for {ticker}: {ce}")
 
             # Place native Alpaca trailing stop
+            trail_pct_val = trail * 100   # Alpaca wants e.g. 3.0 for 3%
+            assert 0.5 <= trail_pct_val <= 20, f"trail_percent {trail_pct_val} out of sane range — check config"
             trail_req = TrailingStopOrderRequest(
                 symbol        = ticker,
                 qty           = qty,
                 side          = OrderSide.SELL,
                 time_in_force = TimeInForce.GTC,
-                trail_percent = trail * 100,   # Alpaca wants e.g. 3.0 for 3%
+                trail_percent = trail_pct_val,
             )
             order = client.submit_order(trail_req)
 

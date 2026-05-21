@@ -24,7 +24,30 @@ from datetime import datetime
 from config import (GUARD_WARN_THRESHOLD, GUARD_TIGHTEN_THRESHOLD,
                     GUARD_CLOSE_THRESHOLD)
 from execution.alpaca import get_positions, tighten_stop, close_position, is_configured
-from signals.sentiment import get_sentiment_with_velocity
+
+
+def _get_cached_sentiment(ticker: str) -> dict:
+    """
+    Read sentiment from Supabase cache only — no live API calls.
+    The main scan already fetches and caches sentiment 12×/day.
+    Avoids burning Alpha Vantage's 25 req/day limit in the hourly guard.
+    """
+    try:
+        import db
+        if db.db_available():
+            cache = db.load_sentiment_cache()
+            ticker_history = cache.get(ticker, {})
+            if ticker_history:
+                latest_date  = max(ticker_history.keys())
+                latest_score = ticker_history[latest_date]
+                dates = sorted(ticker_history.keys(), reverse=True)
+                prior_score  = ticker_history[dates[1]] if len(dates) > 1 else None
+                velocity     = (latest_score - prior_score) if prior_score is not None else 0.0
+                return {"score": latest_score, "velocity": velocity,
+                        "spike": abs(velocity) >= 0.3, "source": "cache"}
+    except Exception:
+        pass
+    return {"score": 0.0, "velocity": 0.0, "spike": False, "source": "unavailable"}
 
 
 def _slack(text: str) -> None:
@@ -54,10 +77,9 @@ def run_guard() -> list[dict]:
         is_long  = "long" in raw_side or "buy" in raw_side
         pl_pct   = p.get("unrealized_pl_pct", 0)
 
-        try:
-            sent = get_sentiment_with_velocity(ticker)
-        except Exception as e:
-            print(f"[guard] Sentiment fetch failed for {ticker}: {e}")
+        sent = _get_cached_sentiment(ticker)
+        if sent["source"] == "unavailable":
+            print(f"  {ticker:6s} — no cached sentiment, skipping")
             continue
 
         score    = sent.get("score", 0.0)

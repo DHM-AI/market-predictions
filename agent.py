@@ -105,17 +105,18 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         if dollar <= 0:
             continue
 
-        # Regime multiplier — reduce position size when market is risky
+        # Regime gate — skip mixed/bullish trades in bear regime
+        if regime and not regime.get("auto_exec_ok", True):
+            if direction in ("bullish", "mixed"):
+                print(f"  {ticker}: SKIPPED — bear regime active ({direction})")
+                continue
+
+        # Regime multiplier — reduce bullish position size when market is risky
         if regime and direction == "bullish":
             multiplier = regime.get("bull_multiplier", 1.0)
             if multiplier < 1.0:
                 dollar = round(dollar * multiplier, 2)
                 print(f"  {ticker}: position reduced to ${dollar:.0f} (regime multiplier {multiplier:.0%})")
-
-            # Hard block on bullish trades in bear regime
-            if not regime.get("auto_exec_ok", True):
-                print(f"  {ticker}: SKIPPED — bear regime active")
-                continue
 
         # Portfolio guard check
         ok, guard_reason = check_trade(ticker, dollar, direction, open_positions, portfolio_value)
@@ -168,7 +169,8 @@ def run_scan(send_email: bool = True,
         regime = _neutral_regime
 
     # ── 1. Scan ───────────────────────────────────────────────────
-    tickers = get_universe()
+    from config import FUTURES
+    tickers = [t for t in get_universe() if t not in FUTURES]  # exclude futures — not tradeable via Alpaca equities
     print(f"\n[1/5] SCAN — {len(tickers)} tickers")
     ohlcv_map = get_ohlcv_batch(tickers, period="1y", chunk_size=50)
     print(f"      Got data for {len(ohlcv_map)} tickers")
@@ -196,7 +198,7 @@ def run_scan(send_email: bool = True,
     # ── 3. Predict ────────────────────────────────────────────────
     print(f"\n[3/5] PREDICT — XGBoost + blended sentiment")
     earnings_map: dict = {}
-    for ticker in tickers[:100]:
+    for ticker in tickers:
         earnings_map[ticker] = get_earnings_days(ticker)
 
     picks_df = predict_universe(tickers, ohlcv_map, sentiment_map, earnings_map)

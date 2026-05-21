@@ -30,7 +30,7 @@ VIX_EXTREME  = 45    # halt bullish auto-execution
 
 _cache: dict = {}
 _cache_ts: datetime | None = None
-CACHE_MINUTES = 30
+from config import REGIME_CACHE_MINUTES as CACHE_MINUTES
 
 
 def _is_cache_fresh() -> bool:

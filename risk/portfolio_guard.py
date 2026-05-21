@@ -77,23 +77,26 @@ def check_trade(
         return False, f"Max {MAX_OPEN_POSITIONS} concurrent positions reached ({len(open_positions)} open)"
 
     # ── Check 3: Daily trade count — read from Alpaca (persists across runs) ──
+    trades_today = 0
     try:
         from execution.alpaca import _get_client, is_configured
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
         if is_configured():
-            today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
-            client    = _get_client()
-            orders    = client.get_orders(GetOrdersRequest(
+            today_utc    = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+            client       = _get_client()
+            orders       = client.get_orders(GetOrdersRequest(
                 status=QueryOrderStatus.ALL, after=today_utc, limit=100))
             trades_today = sum(1 for o in orders
                                if "buy" in str(getattr(o, "side", "")).lower()
                                and str(getattr(o, "status", "")) in
                                ("filled", "partially_filled", "new", "accepted", "pending_new"))
-            if trades_today >= MAX_DAILY_TRADES:
-                return False, f"Daily trade limit reached ({trades_today}/{MAX_DAILY_TRADES} trades placed today)"
-    except Exception:
-        pass  # fail open — don't block trades if check errors
+    except Exception as e:
+        print(f"[guard] Could not fetch daily trade count from Alpaca ({e}) — using in-memory fallback")
+        trades_today = _daily_trade_count  # fall back to in-memory counter
+
+    if trades_today >= MAX_DAILY_TRADES:
+        return False, f"Daily trade limit reached ({trades_today}/{MAX_DAILY_TRADES} trades placed today)"
 
     # ── Check 4: Sector concentration ─────────────────────────────────────────
     if open_positions and portfolio_value and portfolio_value > 0:
@@ -121,8 +124,8 @@ def check_trade(
 
     # ── Check 5: Direction balance ─────────────────────────────────────────────
     if len(open_positions) >= 3:
-        bull_count = sum(1 for p in open_positions if p.get("side","") in ("long","buy"))
-        bear_count = sum(1 for p in open_positions if p.get("side","") in ("short","sell"))
+        bull_count = sum(1 for p in open_positions if "long" in str(p.get("side","")).lower() or "buy" in str(p.get("side","")).lower())
+        bear_count = sum(1 for p in open_positions if "short" in str(p.get("side","")).lower() or "sell" in str(p.get("side","")).lower())
         total      = len(open_positions)
 
         new_is_bull = direction == "bullish"
