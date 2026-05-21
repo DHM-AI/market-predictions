@@ -727,7 +727,7 @@ with left:
           <div class="wait-ring"></div>
           <div style="font-size:15px;font-weight:600;color:{TEXT};margin-bottom:6px;">Waiting for today's scan</div>
           <div style="font-size:12px;color:{TEXT2};line-height:1.8;">
-            The AI agent runs automatically every weekday at <strong style="color:{GLOW};">7× daily starting 7:00 AM ET</strong> via GitHub Actions.<br>
+            The AI agent runs automatically every weekday at <strong style="color:{GLOW};">7× daily starting 7:00 AM ET</strong>.<br>
             Hit <strong style="color:{TEXT};">⟳ Refresh Dashboard</strong> to check for new results.
           </div>
         </div>""", unsafe_allow_html=True)
