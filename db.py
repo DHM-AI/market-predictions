@@ -75,26 +75,35 @@ def load_predictions_for_date(date_str: str) -> list[dict]:
 
 
 def _sanitize(v):
-    """Convert NaN / Infinity / nested objects to JSON-safe types."""
+    """Convert NaN / Infinity / whole-float / nested objects to JSON-safe types."""
     import math
-    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-        return None
-    if isinstance(v, list):
-        return "; ".join(str(i) for i in v)
-    if isinstance(v, dict):
-        return str(v)        # dicts (e.g. breakdown) become strings
-    # numpy scalars → Python native
+
+    # numpy scalars → Python native first
     try:
         import numpy as np
-        if isinstance(v, (np.floating, np.integer)):
-            val = v.item()
-            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
-                return None
-            return val
         if isinstance(v, np.bool_):
             return bool(v)
+        if isinstance(v, np.integer):
+            return int(v)
+        if isinstance(v, np.floating):
+            v = float(v)   # fall through to float handling below
     except ImportError:
         pass
+
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return None
+        # Whole-number floats → int so Supabase INTEGER columns accept them
+        if v == int(v):
+            return int(v)
+        return v
+
+    if isinstance(v, list):
+        return "; ".join(str(i) for i in v)
+
+    if isinstance(v, dict):
+        return str(v)   # dicts (e.g. breakdown) become strings
+
     return v
 
 
