@@ -90,8 +90,6 @@ if "actual_move_5d" in filtered.columns:
     evaluated = filtered[filtered["actual_move_5d"].notna()].copy()
 
 if not evaluated.empty:
-    direction_col = evaluated.get("direction", pd.Series(["bullish"] * len(evaluated)))
-
     # P&L per trade (directionally aware)
     def _compute_pl(row):
         move      = row.get("actual_move_5d", 0)
@@ -105,8 +103,9 @@ if not evaluated.empty:
             return dollar * (-move / 100)
         return 0.0
 
-    evaluated["trade_pl"]     = evaluated.apply(_compute_pl, axis=1)
-    evaluated["trade_return"] = evaluated["trade_pl"] / evaluated.get("dollar_amount", 1000).fillna(1000)
+    evaluated["trade_pl"] = evaluated.apply(_compute_pl, axis=1)
+    _dollar_col = evaluated["dollar_amount"].fillna(1000).replace(0, 1000) if "dollar_amount" in evaluated.columns else pd.Series(1000, index=evaluated.index)
+    evaluated["trade_return"] = evaluated["trade_pl"] / _dollar_col
 
     # Directional hit (win = P&L > 0)
     evaluated["win"] = evaluated["trade_pl"] > 0
@@ -349,7 +348,8 @@ if not evaluated.empty and len(evaluated) >= 8:
 
     with row2_a:
         section_header("RETURN DISTRIBUTION")
-        returns_pct = (evaluated["trade_pl"] / evaluated.get("dollar_amount", 1000).fillna(1000) * 100).round(1)
+        _d = evaluated["dollar_amount"].fillna(1000).replace(0, 1000) if "dollar_amount" in evaluated.columns else pd.Series(1000, index=evaluated.index)
+        returns_pct = (evaluated["trade_pl"] / _d * 100).round(1)
         fig_hist = go.Figure()
         fig_hist.add_trace(go.Histogram(
             x=returns_pct[returns_pct >= 0],

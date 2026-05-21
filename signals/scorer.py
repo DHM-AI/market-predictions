@@ -129,13 +129,14 @@ def score_ticker(
     pattern_side    = pattern_result.get("side", "neutral")
     pattern_weight  = WEIGHTS.get("candlestick", 8)
 
-    if pattern_result.get("triggered") and pattern_side == direction_early[:4]:
+    _dir_prefix = {"bullish": "bull", "bearish": "bear"}.get(direction_early, "neutral")
+    if pattern_result.get("triggered") and pattern_side == _dir_prefix:
         # Pattern confirms direction — full weight
         pts = round(pattern_weight * pattern_result.get("strength", 0.5))
         raw_score += pts
         breakdown["candlestick"] = pts
         signals_triggered.append(f"{pattern_name} (strength={pattern_result['strength']:.2f})")
-    elif pattern_result.get("triggered") and pattern_side != "neutral" and pattern_side != direction_early[:4]:
+    elif pattern_result.get("triggered") and pattern_side != "neutral" and pattern_side != _dir_prefix:
         # Pattern contradicts direction — penalize slightly
         raw_score  = max(0, raw_score - round(pattern_weight * 0.3))
         breakdown["candlestick"] = 0

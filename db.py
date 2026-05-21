@@ -13,8 +13,11 @@ from supabase import create_client, Client
 _SCHEMA_COLS = {
     "date", "ticker", "score", "direction", "duration", "confidence",
     "signals_triggered", "rsi", "bb_pct", "atr_ratio", "volume_ratio",
-    "sentiment_score", "earnings_days", "xgb_prob", "actual_move_5d",
+    "ema50_pct", "sentiment_score", "sentiment_velocity", "earnings_days",
+    "xgb_prob", "actual_move_5d",
     "dollar_amount", "kelly_fraction", "pct_of_bankroll", "risk_level",
+    "pattern", "pattern_side",
+    "options_side", "options_pcr", "options_unusual", "options_detail",
 }
 
 

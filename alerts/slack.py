@@ -112,6 +112,8 @@ def send_daily_digest(picks_df, explanations: dict) -> bool:
         explanation = explanations.get(ticker, "")[:300]
 
         signals = row.get("signals_triggered", []) or []
+        if isinstance(signals, str):
+            signals = [s.strip() for s in signals.replace("[","").replace("]","").replace('"',"").split(";") if s.strip()] or [signals]
         sig_str = " · ".join(signals) if signals else "—"
 
         dir_emoji  = _direction_emoji(direction)
