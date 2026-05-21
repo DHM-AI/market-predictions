@@ -843,24 +843,19 @@ if picks_df is not None and not picks_df.empty:
 # ── TRADE HISTORY ──────────────────────────────────────────────────────────────
 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 st.markdown(
-    f'<div class="sec">Closed Trade History <span class="sec-n">{len([t for t in trades if t.get("ticker","") not in {p["ticker"] for p in (st.session_state.get("_live_positions_data") or [])}])} records</span></div>',
+    f'<div class="sec">Closed Trade History <span class="sec-n">{len(_alpaca_closed)} records</span></div>',
     unsafe_allow_html=True)
 
-# Build P&L maps for trade history
-_open_pl   = {p["ticker"]: p for p in (st.session_state.get("_live_positions_data") or [])}
-_closed_pl = {}
+# Closed trade history — pull directly from Alpaca (catches ALL closes, not just DB entries)
+_alpaca_closed = []
 try:
     if alpaca_ok:
         from execution.alpaca import get_closed_trade_pnl
-        for cp in get_closed_trade_pnl(days=90):
-            _closed_pl[cp["ticker"]] = cp
+        _alpaca_closed = get_closed_trade_pnl(days=90)
 except Exception:
     pass
 
-# Trade history = only CLOSED trades (open ones are shown in Open Positions above)
-closed_trades = [t for t in trades if t.get("ticker","") not in _open_pl]
-
-if not closed_trades:
+if not _alpaca_closed:
     st.markdown(
         f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.08);border-radius:8px;'
         f'padding:28px;text-align:center;">'
@@ -869,50 +864,41 @@ if not closed_trades:
         f'</div>',
         unsafe_allow_html=True)
 else:
-    _grid = "100px 70px 55px 80px 120px 1fr"
+    _grid = "130px 70px 90px 90px 120px 1fr"
     hdr_html = (
         f'<div class="hist-hdr" style="grid-template-columns:{_grid};">'
-        f'<span class="hist-lbl">Closed</span>'
+        f'<span class="hist-lbl">Closed At</span>'
         f'<span class="hist-lbl">Ticker</span>'
-        f'<span class="hist-lbl">Side</span>'
-        f'<span class="hist-lbl">Invested</span>'
+        f'<span class="hist-lbl">Entry</span>'
+        f'<span class="hist-lbl">Exit</span>'
         f'<span class="hist-lbl">Realized P&L</span>'
         f'<span class="hist-lbl">Outcome</span>'
         f'</div>'
     )
     rows_html = ""
-    for t in closed_trades:
-        side    = t.get("side","")
-        sc      = GREEN if side=="buy" else RED
-        ts      = str(t.get("timestamp",""))[:16].replace("T"," ")
-        amt     = float(t.get("dollar_amount",0))
-        ticker_ = t.get("ticker","")
+    for cp in _alpaca_closed:
+        ticker_  = cp["ticker"]
+        rpl      = cp["realized_pnl"]
+        rpct     = cp["realized_pnl_pct"]
+        entry_p  = cp["entry_price"]
+        exit_p   = cp["exit_price"]
+        ts       = cp["closed_at"]
+        outcome  = cp.get("outcome","manual")
+        pc       = GREEN if rpl >= 0 else RED
+        arr      = "▲" if rpl >= 0 else "▼"
 
-        if ticker_ in _closed_pl:
-            cp      = _closed_pl[ticker_]
-            rpl     = cp["realized_pnl"]
-            rpct    = cp["realized_pnl_pct"]
-            pc      = GREEN if rpl >= 0 else RED
-            arr     = "▲" if rpl >= 0 else "▼"
-            outcome = cp.get("outcome","closed")
-            pnl_html = (f'<span style="color:{pc};font-family:JetBrains Mono,monospace;'
-                        f'font-weight:700;font-size:13px;">{arr} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>')
-            olabel   = "🎯 TAKE PROFIT" if outcome=="tp_hit" else "🛑 STOP LOSS" if outcome=="sl_hit" else "CLOSED"
-            oc       = GREEN if outcome=="tp_hit" else RED if outcome=="sl_hit" else TEXT3
-            out_html = f'<span style="color:{oc};font-size:10px;font-weight:800;">{olabel}</span>'
-        else:
-            pnl_html = f'<span style="color:{TEXT3};">—</span>'
-            out_html = f'<span style="color:{TEXT3};font-size:11px;">Closed</span>'
+        pnl_html = (f'<span style="color:{pc};font-family:JetBrains Mono,monospace;'
+                    f'font-weight:700;font-size:13px;">{arr} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>')
+        olabel   = "🎯 TAKE PROFIT" if outcome=="tp_hit" else "🛑 STOP LOSS" if outcome=="sl_hit" else "✋ MANUAL"
+        oc       = GREEN if outcome=="tp_hit" else RED if outcome=="sl_hit" else AMBER
+        out_html = f'<span style="color:{oc};font-size:10px;font-weight:800;">{olabel}</span>'
 
         rows_html += (
             f'<div class="hist-row" style="grid-template-columns:{_grid};">'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT3};">{ts}</span>'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:{GLOW};">{ticker_}</span>'
-            f'<span style="background:{"rgba(0,255,136,0.1)" if side=="buy" else "rgba(255,45,120,0.1)"};'
-            f'border:1px solid {"rgba(0,255,136,0.3)" if side=="buy" else "rgba(255,45,120,0.3)"};'
-            f'color:{sc};font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 7px;border-radius:3px;">'
-            f'{side.upper()}</span>'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;color:{TEXT2};">${amt:,.0f}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:12px;color:{TEXT2};">${entry_p:.2f}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:12px;color:{TEXT};">${exit_p:.2f}</span>'
             f'<span>{pnl_html}</span>'
             f'<span>{out_html}</span>'
             f'</div>'
