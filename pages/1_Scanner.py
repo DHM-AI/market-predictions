@@ -833,11 +833,33 @@ with left:
         f'<div class="sec">Today\'s Trade Recommendations <span class="sec-n">{n_picks} setups</span></div>',
         unsafe_allow_html=True)
 
+    @st.cache_data(ttl=86400, show_spinner=False)
+    def _company_names(tickers: tuple) -> dict:
+        """Fetch company short names from yfinance — cached 24h."""
+        names = {}
+        try:
+            import yfinance as yf
+            for t in tickers:
+                try:
+                    info = yf.Ticker(t).fast_info
+                    # fast_info doesn't have name; use Ticker.info shortName
+                    names[t] = yf.Ticker(t).info.get("shortName") or ""
+                except Exception:
+                    names[t] = ""
+        except Exception:
+            pass
+        return names
+
     if picks_df is not None and not picks_df.empty:
         sorted_df = picks_df[
             (picks_df["direction"] != "mixed") &
             (picks_df["score"] >= 70)
         ].sort_values("score", ascending=False)
+
+        # Pre-fetch company names for visible tickers (cached 24h)
+        _visible_tickers = tuple(sorted_df["ticker"].tolist())
+        _cnames = _company_names(_visible_tickers)
+
         chunks = [sorted_df.iloc[i:i+3] for i in range(0, len(sorted_df), 3)]
         for chunk in chunks:
             cols = st.columns(3)
@@ -867,9 +889,10 @@ with left:
                     except Exception:
                         kelly = 0
 
-                tip  = tooltip_content(row)
-                rea  = plain_reason(row)
-                ks   = f"${kelly:,.0f}" if kelly else "Calculating..."
+                tip    = tooltip_content(row)
+                rea    = plain_reason(row)
+                ks     = f"${kelly:,.0f}" if kelly else "Calculating..."
+                cname  = _cnames.get(ticker, "")
 
                 card = f"""
 <div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">
@@ -879,6 +902,7 @@ with left:
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
     <div>
       <div class="card-ticker" style="color:{acc};text-shadow:0 0 18px {acc}44;">{ticker}</div>
+      {f'<div style="font-size:10px;color:{TEXT3};margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">{cname}</div>' if cname else ''}
       <div class="card-action" style="background:{ab};border:1px solid {abrd};color:{acc};">{alabel}</div>
       <div style="font-size:10px;color:{TEXT2};margin-top:4px;">{dur}</div>
     </div>
