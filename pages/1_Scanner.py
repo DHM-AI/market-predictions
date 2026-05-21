@@ -586,6 +586,8 @@ def live_alpaca():
     if positions:
         # Cross-ref trades DB for SL/TP and entry timestamp
         _trade_sl_tp = {}
+        # Detect which tickers have an active trailing stop (from Alpaca open orders)
+        _trailing_tickers = set()
         try:
             from datetime import date as _date
             _today_str = _date.today().isoformat()
@@ -601,6 +603,20 @@ def live_alpaca():
                 # Capture the most recent entry timestamp for this ticker
                 if _t.get("timestamp") and "entry_ts" not in _trade_sl_tp[_tk]:
                     _trade_sl_tp[_tk]["entry_ts"] = str(_t["timestamp"])[:10]  # YYYY-MM-DD
+        except Exception:
+            pass
+
+        # Detect trailing stops from Alpaca open orders
+        try:
+            if alpaca_ok:
+                from execution.alpaca import _get_client as _aclient
+                from alpaca.trading.requests import GetOrdersRequest
+                from alpaca.trading.enums import QueryOrderStatus
+                _open_ords = _aclient().get_orders(
+                    GetOrdersRequest(status=QueryOrderStatus.OPEN))
+                for _o in _open_ords:
+                    if "trailing" in str(getattr(_o, "type", "")).lower():
+                        _trailing_tickers.add(_o.symbol)
         except Exception:
             pass
 
@@ -636,7 +652,19 @@ def live_alpaca():
             # SL/TP — prefer Alpaca bracket legs, fall back to trades DB
             sl = p.get("stop_loss") or _trade_sl_tp.get(ticker_p, {}).get("stop_loss")
             tp = p.get("take_profit") or _trade_sl_tp.get(ticker_p, {}).get("take_profit")
-            sl_str = f'<span style="color:{RED};font-family:JetBrains Mono,monospace;">${sl:.2f}</span>' if sl else f'<span style="color:{TEXT3};">—</span>'
+            is_trailing = ticker_p in _trailing_tickers
+            if is_trailing:
+                sl_val = f'${sl:.2f}' if sl else "tracking"
+                sl_str = (
+                    f'<span style="color:{AMBER};font-family:JetBrains Mono,monospace;'
+                    f'font-size:11px;">🔒 {sl_val}</span>'
+                    f'<span style="display:block;font-size:8px;color:{AMBER};'
+                    f'letter-spacing:0.8px;font-weight:700;">TRAILING</span>'
+                )
+            elif sl:
+                sl_str = f'<span style="color:{RED};font-family:JetBrains Mono,monospace;">${sl:.2f}</span>'
+            else:
+                sl_str = f'<span style="color:{TEXT3};">—</span>'
             tp_str = f'<span style="color:{GREEN};font-family:JetBrains Mono,monospace;">${tp:.2f}</span>' if tp else f'<span style="color:{TEXT3};">—</span>'
 
             # Trade type badge — intraday (opened today) vs swing (opened earlier)

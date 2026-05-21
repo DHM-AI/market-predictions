@@ -1,0 +1,34 @@
+name: Trailing Stop Manager
+
+on:
+  schedule:
+    # Every 30 min, Mon–Fri, 9:30 AM – 3:30 PM ET (13:30–19:30 UTC during EDT)
+    - cron: '0,30 13,14,15,16,17,18,19 * * 1-5'
+  workflow_dispatch:   # allow manual trigger from GitHub Actions UI
+
+jobs:
+  trail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      ALPACA_API_KEY:    ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+      ALPACA_BASE_URL:   ${{ secrets.ALPACA_BASE_URL }}
+      ALPACA_LIVE_MODE:  ${{ secrets.ALPACA_LIVE_MODE }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      BANKROLL:          ${{ secrets.BANKROLL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run trailing stop check
+        run: python trail_stops.py

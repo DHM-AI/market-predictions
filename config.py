@@ -70,6 +70,12 @@ KELLY_FRACTION    = 0.5    # use half-Kelly for safety
 MAX_POSITION_PCT  = 0.15   # max 15% of bankroll per trade (raised to support 10%/mo goal)
 DAILY_LOSS_LIMIT_PCT = 0.05  # halt trading if down 5% in a day
 
+# ── Trailing stop ──────────────────────────────────────────────────────────────
+# When a position gains TRAIL_TRIGGER_PCT, cancel the fixed SL and replace
+# with an Alpaca native trailing stop that follows price up automatically.
+TRAIL_TRIGGER_PCT = 0.03   # activate trailing when position is up 3%
+TRAIL_PCT         = 0.03   # trail 3% below the highest price since activation
+
 # ── Auto-execution threshold ──────────────────────────────────────────────────
 # Only auto-execute if score >= this AND Alpaca is configured
 AUTO_EXECUTE_MIN_SCORE = 70

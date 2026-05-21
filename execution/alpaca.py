@@ -381,6 +381,131 @@ def close_position(ticker: str) -> dict:
         return {"status": "error", "reason": str(e), "ticker": ticker}
 
 
+def trail_positions(
+    trigger_pct: float | None = None,
+    trail_pct:   float | None = None,
+) -> list[dict]:
+    """
+    Trailing stop manager — call every 30 min during market hours.
+
+    For every LONG position that is up ≥ trigger_pct:
+      1. Cancel the existing fixed stop-loss order (if still open)
+      2. Leave the take-profit limit order untouched
+      3. Place an Alpaca native trailing stop (GTC) at trail_pct below peak
+
+    Already-trailing positions are detected by order type and skipped,
+    so this is safe to call repeatedly.
+
+    Returns a list of dicts for positions that were upgraded to trailing.
+    """
+    from config import TRAIL_TRIGGER_PCT, TRAIL_PCT
+
+    trigger = trigger_pct if trigger_pct is not None else TRAIL_TRIGGER_PCT
+    trail   = trail_pct   if trail_pct   is not None else TRAIL_PCT
+
+    if not is_configured():
+        return []
+
+    results = []
+    try:
+        from alpaca.trading.requests import (GetOrdersRequest,
+                                              TrailingStopOrderRequest)
+        from alpaca.trading.enums import (QueryOrderStatus, OrderSide,
+                                          TimeInForce)
+
+        client    = _get_client()
+        positions = get_positions()
+        if not positions:
+            return []
+
+        # Build map: ticker → open order list
+        open_orders = client.get_orders(
+            GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        orders_by_ticker: dict = {}
+        for o in open_orders:
+            orders_by_ticker.setdefault(o.symbol, []).append(o)
+
+        for p in positions:
+            ticker   = p["ticker"]
+            pct_gain = p.get("unrealized_pl_pct", 0)  # already in %
+            qty      = p["qty"]
+            raw_side = str(p.get("side", "")).lower()
+            is_long  = "long" in raw_side or "buy" in raw_side
+
+            # Only handle longs for now; shorts need inverted logic
+            if not is_long:
+                continue
+
+            # Not profitable enough yet
+            if pct_gain < trigger * 100:
+                continue
+
+            ticker_orders = orders_by_ticker.get(ticker, [])
+
+            # Skip if a trailing stop already exists for this ticker
+            already_trailing = any(
+                "trailing" in str(getattr(o, "type", "")).lower()
+                for o in ticker_orders
+            )
+            if already_trailing:
+                print(f"[trail] {ticker} already has a trailing stop — skipping")
+                continue
+
+            # Cancel existing fixed stop-loss order(s)
+            cancelled = 0
+            for o in ticker_orders:
+                otype = str(getattr(o, "type", "")).lower()
+                if "stop" in otype and "limit" not in otype:
+                    try:
+                        client.cancel_order_by_id(str(o.id))
+                        cancelled += 1
+                    except Exception as ce:
+                        print(f"[trail] Could not cancel SL for {ticker}: {ce}")
+
+            # Place native Alpaca trailing stop
+            trail_req = TrailingStopOrderRequest(
+                symbol        = ticker,
+                qty           = qty,
+                side          = OrderSide.SELL,
+                time_in_force = TimeInForce.GTC,
+                trail_percent = trail * 100,   # Alpaca wants e.g. 3.0 for 3%
+            )
+            order = client.submit_order(trail_req)
+
+            mode = "LIVE" if is_live_mode() else "PAPER"
+            print(f"[trail] [{mode}] {ticker} up {pct_gain:.1f}% → "
+                  f"trailing stop {trail*100:.0f}% activated "
+                  f"(cancelled {cancelled} fixed SL)")
+
+            result = {
+                "ticker":       ticker,
+                "pct_gain":     round(pct_gain, 2),
+                "trail_pct":    trail,
+                "order_id":     str(order.id),
+                "cancelled_sl": cancelled,
+                "status":       "trailing",
+                "timestamp":    datetime.now().isoformat(),
+            }
+            results.append(result)
+
+            # Instant Slack ping
+            try:
+                from alerts.slack import _post
+                _post({"text": (
+                    f"🔒 *Trailing stop activated — {ticker}*\n"
+                    f">Up *{pct_gain:.1f}%* · fixed SL replaced with "
+                    f"*{trail*100:.0f}% trailing stop* below peak\n"
+                    f">Take-profit target unchanged"
+                )})
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"[trail] trail_positions error: {e}")
+
+    return results
+
+
 def cancel_all_orders() -> int:
     """Cancel all open orders. Returns count cancelled."""
     if not is_configured():
