@@ -246,6 +246,91 @@ def get_positions() -> list[dict]:
         return []
 
 
+def get_closed_trade_pnl(days: int = 60) -> list[dict]:
+    """
+    Fetch realized P&L for recently closed trades by looking at filled orders.
+    For bracket orders: matches parent entry fill with SL/TP exit fill.
+
+    Returns list of dicts:
+        ticker, side, qty, entry_price, exit_price, realized_pnl,
+        realized_pnl_pct, outcome ('tp_hit' | 'sl_hit' | 'closed'), closed_at
+    """
+    if not is_configured():
+        return []
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        from datetime import datetime, timedelta
+
+        client = _get_client()
+        after  = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT00:00:00Z")
+
+        orders = client.get_orders(GetOrdersRequest(
+            status=QueryOrderStatus.CLOSED,
+            after=after,
+            limit=200,
+        ))
+
+        results = []
+        for o in orders:
+            try:
+                # Only care about filled parent bracket orders (the entry leg)
+                if str(o.order_class) != "bracket":
+                    continue
+                if not o.filled_avg_price or not o.filled_qty:
+                    continue
+
+                entry_price = float(o.filled_avg_price)
+                qty         = float(o.filled_qty)
+                side        = str(o.side)   # "buy" or "sell"
+                ticker      = o.symbol
+                filled_at   = str(o.filled_at)[:16] if o.filled_at else ""
+
+                # Look at legs to find which one filled (SL or TP)
+                exit_price = None
+                outcome    = "closed"
+                for leg in (o.legs or []):
+                    if hasattr(leg, "filled_avg_price") and leg.filled_avg_price:
+                        exit_price = float(leg.filled_avg_price)
+                        # TP leg has a limit price; SL leg has a stop price
+                        if hasattr(leg, "limit_price") and leg.limit_price:
+                            outcome = "tp_hit"
+                        elif hasattr(leg, "stop_price") and leg.stop_price:
+                            outcome = "sl_hit"
+
+                if exit_price is None:
+                    continue   # entry filled but not yet exited
+
+                # P&L: long = (exit - entry) * qty, short = (entry - exit) * qty
+                if side == "buy":
+                    realized_pnl = (exit_price - entry_price) * qty
+                else:
+                    realized_pnl = (entry_price - exit_price) * qty
+
+                realized_pnl_pct = (exit_price / entry_price - 1) * 100 if side == "buy" \
+                                   else (entry_price / exit_price - 1) * 100
+
+                results.append({
+                    "ticker":           ticker,
+                    "side":             side,
+                    "qty":              qty,
+                    "entry_price":      round(entry_price, 2),
+                    "exit_price":       round(exit_price, 2),
+                    "realized_pnl":     round(realized_pnl, 2),
+                    "realized_pnl_pct": round(realized_pnl_pct, 2),
+                    "outcome":          outcome,
+                    "closed_at":        filled_at,
+                })
+            except Exception:
+                continue
+
+        return sorted(results, key=lambda x: x["closed_at"], reverse=True)
+
+    except Exception as e:
+        print(f"[alpaca] get_closed_trade_pnl error: {e}")
+        return []
+
+
 def close_position(ticker: str) -> dict:
     """Close an open position immediately at market price."""
     if not is_configured():

@@ -491,9 +491,10 @@ def live_alpaca():
     equity       = acct.get("equity", portfolio)
     total_pl     = sum(p.get("unrealized_pl", 0) for p in positions)
     pl_color     = GREEN if total_pl >= 0 else RED
-    # store for goal bar at bottom
-    st.session_state["_live_pl"]        = total_pl
-    st.session_state["_live_positions"] = len(positions)
+    # store for goal bar + trade history P&L lookup
+    st.session_state["_live_pl"]             = total_pl
+    st.session_state["_live_positions"]      = len(positions)
+    st.session_state["_live_positions_data"] = positions
 
     # ── Metric strip ──────────────────────────────────────────────────────────
     def mc(label, val, sub, color=TEXT3, tip=""):
@@ -792,34 +793,68 @@ st.markdown(
     unsafe_allow_html=True)
 
 if trades:
-    hdr = (f'<div class="hist-hdr">'
+    # Build P&L lookups
+    _open_pl   = {p["ticker"]: p for p in (st.session_state.get("_live_positions_data") or [])}
+    _closed_pl = {}
+    try:
+        if alpaca_ok:
+            from execution.alpaca import get_closed_trade_pnl
+            for cp in get_closed_trade_pnl(days=90):
+                _closed_pl[cp["ticker"]] = cp
+    except Exception:
+        pass
+
+    hdr = (f'<div class="hist-hdr" style="grid-template-columns:100px 70px 55px 80px 110px 1fr;">'
            f'<span class="hist-lbl">Time</span>'
            f'<span class="hist-lbl">Ticker</span>'
            f'<span class="hist-lbl">Side</span>'
            f'<span class="hist-lbl">Amount</span>'
-           f'<span class="hist-lbl">Mode</span>'
-           f'<span class="hist-lbl">Reason</span>'
+           f'<span class="hist-lbl">P&L</span>'
+           f'<span class="hist-lbl">Status / Reason</span>'
            f'</div>')
     rows_html = ""
     for t in trades:
-        side  = t.get("side","")
-        c     = GREEN if side=="buy" else RED
-        ts    = str(t.get("timestamp",""))[:16].replace("T"," ")
-        amt   = float(t.get("dollar_amount",0))
-        mode  = t.get("mode","PAPER")
-        mc    = RED if mode=="LIVE" else AMBER
-        reason= str(t.get("reason","—"))[:80]
+        side    = t.get("side","")
+        c       = GREEN if side=="buy" else RED
+        ts      = str(t.get("timestamp",""))[:16].replace("T"," ")
+        amt     = float(t.get("dollar_amount",0))
+        ticker_ = t.get("ticker","")
+
+        # P&L column
+        if ticker_ in _open_pl:
+            upl  = _open_pl[ticker_]["unrealized_pl"]
+            upct = _open_pl[ticker_]["unrealized_pl_pct"]
+            pc   = GREEN if upl >= 0 else RED
+            arr  = "▲" if upl >= 0 else "▼"
+            pnl_html = f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;font-size:12px;">{arr} ${abs(upl):,.2f} ({upct:+.1f}%)</span>'
+            status_html = f'<span style="color:{GLOW};font-size:9px;font-weight:800;letter-spacing:1px;">● LIVE</span>'
+        elif ticker_ in _closed_pl:
+            cp   = _closed_pl[ticker_]
+            rpl  = cp["realized_pnl"]
+            rpct = cp["realized_pnl_pct"]
+            pc   = GREEN if rpl >= 0 else RED
+            arr  = "▲" if rpl >= 0 else "▼"
+            pnl_html = f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;font-size:12px;">{arr} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>'
+            outcome  = cp.get("outcome","closed")
+            olabel   = "🎯 TP HIT" if outcome=="tp_hit" else "🛑 SL HIT" if outcome=="sl_hit" else "CLOSED"
+            oc       = GREEN if outcome=="tp_hit" else RED if outcome=="sl_hit" else TEXT3
+            status_html = f'<span style="color:{oc};font-size:9px;font-weight:800;letter-spacing:1px;">{olabel}</span>'
+        else:
+            pnl_html    = f'<span style="color:{TEXT3};font-size:11px;">Pending</span>'
+            reason_trunc = str(t.get("reason","—"))[:60]
+            status_html = f'<span style="font-size:11px;color:{TEXT2};">{reason_trunc}</span>'
+
         rows_html += (
-            f'<div class="hist-row">'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT2};">{ts}</span>'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:{GLOW};">{t.get("ticker","")}</span>'
+            f'<div class="hist-row" style="grid-template-columns:100px 70px 55px 80px 110px 1fr;">'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT3};">{ts}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:{GLOW};">{ticker_}</span>'
             f'<span style="background:{"rgba(0,255,136,0.1)" if side=="buy" else "rgba(255,45,120,0.1)"};'
             f'border:1px solid {"rgba(0,255,136,0.3)" if side=="buy" else "rgba(255,45,120,0.3)"};'
             f'color:{c};font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 7px;border-radius:3px;">'
             f'{side.upper()}</span>'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:{c};">${amt:,.0f}</span>'
-            f'<span style="font-size:10px;font-weight:700;color:{mc};">{mode}</span>'
-            f'<span style="font-size:11px;color:{TEXT2};">{reason}</span>'
+            f'<span>{pnl_html}</span>'
+            f'<span>{status_html}</span>'
             f'</div>'
         )
     st.markdown(

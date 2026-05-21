@@ -293,32 +293,71 @@ try:
             headers = ["Time", "Ticker", "Side", "Amount", "Entry", "SL", "TP", "Mode", "Reason"]
             cols_w  = "120px 80px 70px 100px 80px 80px 80px 60px 1fr"
 
+            # Build lookup maps: open positions and closed trade P&L
+            open_pl_map = {p["ticker"]: p for p in positions}   # live unrealized P&L
+            closed_pnl_map = {}
+            try:
+                from execution.alpaca import get_closed_trade_pnl
+                for cp in get_closed_trade_pnl(days=90):
+                    closed_pnl_map[cp["ticker"]] = cp
+            except Exception:
+                pass
+
+            headers = ["Time", "Ticker", "Side", "Invested", "Entry", "SL", "TP", "P&L", "Status"]
+            cols_w  = "110px 70px 60px 90px 80px 80px 80px 110px 1fr"
+
             hdr_html = f'<div class="tbl-hdr" style="grid-template-columns:{cols_w};">' + \
                        "".join(f'<div class="tbl-lbl">{h}</div>' for h in headers) + "</div>"
 
             rows_html = ""
             for _, t in tdf.iterrows():
-                side_  = t.get("side", "")
-                sc     = GREEN if side_ == "buy" else RED
-                ts     = str(t.get("timestamp", ""))[:16].replace("T", " ")
-                entry_ = t.get("entry_price")
-                sl_    = t.get("stop_loss")
-                tp_    = t.get("take_profit")
+                side_   = t.get("side", "")
+                sc      = GREEN if side_ == "buy" else RED
+                ts      = str(t.get("timestamp", ""))[:16].replace("T", " ")
+                ticker_ = t.get("ticker", "")
+                entry_  = t.get("entry_price")
+                sl_     = t.get("stop_loss")
+                tp_     = t.get("take_profit")
                 entry_s = f'${float(entry_):,.2f}' if entry_ else "—"
                 sl_s    = f'${float(sl_):,.2f}'    if sl_    else "—"
                 tp_s    = f'${float(tp_):,.2f}'    if tp_    else "—"
 
+                # P&L column — live if open, realized if closed
+                if ticker_ in open_pl_map:
+                    upl   = open_pl_map[ticker_]["unrealized_pl"]
+                    upct  = open_pl_map[ticker_]["unrealized_pl_pct"]
+                    pc    = GREEN if upl >= 0 else RED
+                    arrow = "▲" if upl >= 0 else "▼"
+                    pnl_s = (f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;">'
+                             f'{arrow} ${abs(upl):,.2f} ({upct:+.1f}%)</span>')
+                    status_s = f'<span style="color:{GLOW};font-size:10px;font-weight:700;">● OPEN</span>'
+                elif ticker_ in closed_pnl_map:
+                    cp    = closed_pnl_map[ticker_]
+                    rpl   = cp["realized_pnl"]
+                    rpct  = cp["realized_pnl_pct"]
+                    pc    = GREEN if rpl >= 0 else RED
+                    arrow = "▲" if rpl >= 0 else "▼"
+                    pnl_s = (f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;">'
+                             f'{arrow} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>')
+                    outcome_map = {"tp_hit": f"🎯 TP HIT", "sl_hit": f"🛑 SL HIT", "closed": "CLOSED"}
+                    outcome_label = outcome_map.get(cp.get("outcome","closed"), "CLOSED")
+                    oc = GREEN if cp.get("outcome") == "tp_hit" else RED if cp.get("outcome") == "sl_hit" else TEXT3
+                    status_s = f'<span style="color:{oc};font-size:10px;font-weight:700;">{outcome_label}</span>'
+                else:
+                    pnl_s    = f'<span style="color:{TEXT3};">Pending</span>'
+                    status_s = f'<span style="color:{TEXT3};font-size:10px;">PENDING</span>'
+
                 rows_html += (
                     f'<div class="tbl-row" style="grid-template-columns:{cols_w};">'
                     f'<div style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT3};">{ts}</div>'
-                    f'<div style="font-family:JetBrains Mono,monospace;font-weight:700;color:{TEXT};">{t.get("ticker","")}</div>'
+                    f'<div style="font-family:JetBrains Mono,monospace;font-weight:700;color:{TEXT};">{ticker_}</div>'
                     f'<div style="color:{sc};font-weight:700;font-size:12px;">{side_.upper()}</div>'
-                    f'<div style="font-family:JetBrains Mono,monospace;color:{GREEN};">${float(t.get("dollar_amount",0)):,.0f}</div>'
+                    f'<div style="font-family:JetBrains Mono,monospace;color:{GLOW};">${float(t.get("dollar_amount",0)):,.0f}</div>'
                     f'<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:{TEXT2};">{entry_s}</div>'
                     f'<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:{RED};">{sl_s}</div>'
                     f'<div style="font-family:JetBrains Mono,monospace;font-size:12px;color:{GREEN};">{tp_s}</div>'
-                    f'<div style="font-size:11px;color:{TEXT3};">{t.get("mode","")}</div>'
-                    f'<div style="font-size:11px;color:{TEXT3};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{str(t.get("reason",""))[:60]}</div>'
+                    f'<div>{pnl_s}</div>'
+                    f'<div>{status_s}</div>'
                     f'</div>'
                 )
 
