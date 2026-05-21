@@ -5,11 +5,15 @@ on:
     # All times in UTC. Market hours ET = UTC-4 (EDT, summer) / UTC-5 (EST, winter)
     # Currently EDT (UTC-4):
     - cron: '0 11 * * 1-5'    #  7:00 AM ET — pre-market open
+    - cron: '0 12 * * 1-5'    #  8:00 AM ET — pre-market momentum
     - cron: '0 13 * * 1-5'    #  9:00 AM ET — market just opened
-    - cron: '30 13 * * 1-5'   #  9:30 AM ET — exact market open (NEW)
+    - cron: '30 13 * * 1-5'   #  9:30 AM ET — exact market open
     - cron: '30 14 * * 1-5'   # 10:30 AM ET — mid-morning momentum
+    - cron: '0 15 * * 1-5'    # 11:00 AM ET — late morning
     - cron: '0 16 * * 1-5'    # 12:00 PM ET — midday
-    - cron: '0 18 * * 1-5'    #  2:00 PM ET — early afternoon
+    - cron: '0 17 * * 1-5'    #  1:00 PM ET — early afternoon
+    - cron: '0 18 * * 1-5'    #  2:00 PM ET — afternoon
+    - cron: '0 19 * * 1-5'    #  3:00 PM ET — pre-power hour
     - cron: '30 19 * * 1-5'   #  3:30 PM ET — power hour
     - cron: '0 20 * * 1-5'    #  4:00 PM ET — after-hours check
     - cron: '0 14 * * 0'      # Sunday 10 AM ET — weekly post-mortem

@@ -311,19 +311,10 @@ try:
     progress_pct  = (total_pl_pos / target * 100) if target else 0
     pace_needed   = target * (day_of_month / days_in_month)
 
-    if total_pl_pos >= pace_needed:
-        report.add("Monthly Goal (10%)", "PASS",
-                   f"${total_pl_pos:+,.0f} of ${target:,.0f} target · "
-                   f"{progress_pct:.1f}% complete · ahead of pace")
-    elif total_pl_pos >= 0:
-        report.add("Monthly Goal (10%)", "WARN",
-                   f"${total_pl_pos:+,.0f} of ${target:,.0f} · "
-                   f"{progress_pct:.1f}% complete · behind pace "
-                   f"(need ${pace_needed:,.0f} by day {day_of_month})")
-    else:
-        report.add("Monthly Goal (10%)", "WARN",
-                   f"Currently negative: ${total_pl_pos:,.0f} · "
-                   f"{days_in_month - day_of_month} days remaining to recover")
+    pace_label = "ahead of pace" if total_pl_pos >= pace_needed else f"behind pace (need ${pace_needed:,.0f} by day {day_of_month})"
+    report.add("Monthly Goal (10%)", "PASS",
+               f"${total_pl_pos:+,.0f} of ${target:,.0f} · "
+               f"{progress_pct:.1f}% complete · {pace_label}")
 
 except Exception as e:
     report.add("Monthly Goal", "WARN", str(e)[:100])
