@@ -542,8 +542,7 @@ def live_alpaca():
     _total_color    = GREEN if _total_today > 0 else RED if _total_today < 0 else TEXT2
 
     pl_sign    = "+" if total_pl >= 0 else ""
-    _rl_sub    = (f"${abs(_realized_today):+,.0f} locked · ${abs(total_pl):+,.0f} floating"
-                  if _closed_count else f"{len(positions)} open positions floating")
+    _rl_sub    = f"🔒 ${_realized_today:+,.0f} closed · 📈 ${total_pl:+,.0f} open"
 
     st.markdown(
         f'<div class="metrics-row" style="grid-template-columns:repeat(6,1fr);">'
