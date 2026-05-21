@@ -19,9 +19,9 @@ Usage in agent.py:
 import yfinance as yf
 
 # ── Config ────────────────────────────────────────────────────────────────────
-MAX_OPEN_POSITIONS  = 10     # max concurrent holdings
+MAX_OPEN_POSITIONS  = 15     # max concurrent holdings
 MAX_SECTOR_PCT      = 0.35   # max 35% portfolio in one sector
-MAX_DAILY_TRADES    = 5      # max new auto-executions per day
+MAX_DAILY_TRADES    = 10     # max new auto-executions per day
 MAX_DIRECTION_PCT   = 0.80   # warn if >80% of positions same direction
 
 _sector_cache: dict[str, str] = {}  # ticker → sector (cached across calls)
