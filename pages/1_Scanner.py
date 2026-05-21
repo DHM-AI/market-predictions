@@ -722,7 +722,10 @@ with left:
         unsafe_allow_html=True)
 
     if picks_df is not None and not picks_df.empty:
-        sorted_df = picks_df[picks_df["direction"] != "mixed"].sort_values("score", ascending=False)
+        sorted_df = picks_df[
+            (picks_df["direction"] != "mixed") &
+            (picks_df["score"] >= 70)
+        ].sort_values("score", ascending=False)
         chunks = [sorted_df.iloc[i:i+3] for i in range(0, len(sorted_df), 3)]
         for chunk in chunks:
             cols = st.columns(3)
