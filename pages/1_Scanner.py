@@ -48,6 +48,29 @@ div[class*="manage"] {{ display:none !important; }}
 section[data-testid="stSidebar"] {{ display:none !important; }}
 [data-testid="collapsedControl"] {{ display:none !important; }}
 .block-container {{ padding:16px 24px !important; max-width:100% !important; }}
+
+/* ── Mobile responsive ── */
+@media (max-width: 768px) {{
+    .block-container {{ padding:10px 12px !important; }}
+    .metrics-row {{ grid-template-columns:repeat(2,1fr) !important; gap:8px !important; }}
+    .metric-val {{ font-size:16px !important; }}
+    .metric-lbl {{ font-size:8px !important; }}
+    .trade-card {{ padding:12px !important; }}
+    .top-row {{ flex-direction:column; align-items:flex-start; gap:8px; }}
+    .top-right {{ flex-wrap:wrap; }}
+    div[style*="grid-template-columns:80px"] {{
+        grid-template-columns:70px 60px 1fr 1fr 1fr !important;
+        font-size:11px !important;
+    }}
+    .hist-hdr, .hist-row {{
+        grid-template-columns:90px 60px 1fr 1fr !important;
+    }}
+    /* Hide less critical columns on mobile */
+    div[style*="grid-template-columns:80px"] > span:nth-child(4),
+    div[style*="grid-template-columns:80px"] > span:nth-child(7) {{
+        display:none !important;
+    }}
+}}
 hr {{ border-color:rgba(0,180,255,0.08) !important; margin:16px 0 !important; }}
 
 /* ── Top bar ── */

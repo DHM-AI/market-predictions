@@ -1,0 +1,54 @@
+name: End of Day
+
+on:
+  schedule:
+    - cron: '50 19 * * 1-5'   # 3:50 PM ET — close intraday positions
+    - cron: '15 20 * * 1-5'   # 4:15 PM ET — send EOD report
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Which step to run'
+        required: false
+        default: 'both'
+        type: choice
+        options: [close_intraday, eod_report, both]
+
+jobs:
+  eod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      ALPACA_API_KEY:    ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+      ALPACA_BASE_URL:   ${{ secrets.ALPACA_BASE_URL }}
+      ALPACA_LIVE_MODE:  ${{ secrets.ALPACA_LIVE_MODE }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY:      ${{ secrets.SUPABASE_KEY }}
+      BANKROLL:          ${{ secrets.BANKROLL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Close intraday positions (3:50 PM)
+        if: |
+          github.event.schedule == '50 19 * * 1-5' ||
+          github.event.inputs.mode == 'close_intraday' ||
+          github.event.inputs.mode == 'both'
+        run: python close_intraday.py
+
+      - name: Send EOD report (4:15 PM)
+        if: |
+          github.event.schedule == '15 20 * * 1-5' ||
+          github.event.inputs.mode == 'eod_report' ||
+          github.event.inputs.mode == 'both'
+        run: python eod_report.py
