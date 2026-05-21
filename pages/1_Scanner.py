@@ -844,11 +844,6 @@ if picks_df is not None and not picks_df.empty:
             st.markdown(f'<div style="color:{TEXT2};padding:20px;text-align:center;font-size:12px;">Chart unavailable: {e}</div>', unsafe_allow_html=True)
 
 # ── TRADE HISTORY ──────────────────────────────────────────────────────────────
-st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-st.markdown(
-    f'<div class="sec">Closed Trade History <span class="sec-n">{len(_alpaca_closed)} records</span></div>',
-    unsafe_allow_html=True)
-
 # Closed trade history — pull directly from Alpaca (catches ALL closes, not just DB entries)
 _alpaca_closed = []
 try:
@@ -857,6 +852,11 @@ try:
         _alpaca_closed = get_closed_trade_pnl(days=90)
 except Exception:
     pass
+
+st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+st.markdown(
+    f'<div class="sec">Closed Trade History <span class="sec-n">{len(_alpaca_closed)} records</span></div>',
+    unsafe_allow_html=True)
 
 if not _alpaca_closed:
     st.markdown(
