@@ -31,16 +31,16 @@ def _get_todays_entries() -> set[str]:
         return set()
 
 
-# Duration strings that mean SHORT-TERM → close EOD
-_SHORT_DURATIONS = ("1d", "intraday", "same-day", "1-3d")
+# ONLY truly 1-day trades close at EOD.
+# "1-3d" means up to 3 days — hold it.
+# "2d", "3d", "5-7d", "2-3w" all hold until their natural exit.
+_EOD_CLOSE_DURATIONS = ("1d", "intraday", "same-day", "same day")
 
-# Duration strings that mean SWING → hold overnight
-_SWING_DURATIONS = ("5-7d", "2-3w", "1w", "week", "swing")
 
-
-def _is_short_term(duration: str) -> bool:
-    d = duration.lower()
-    return any(k in d for k in _SHORT_DURATIONS)
+def _is_eod_close(duration: str) -> bool:
+    """Only pure 1-day trades close at EOD. 2d, 3d, 1-3d etc. hold."""
+    d = duration.lower().strip()
+    return any(d.startswith(k) or d == k for k in _EOD_CLOSE_DURATIONS)
 
 
 def _get_duration_map(tickers: set[str]) -> dict[str, str]:
@@ -80,13 +80,14 @@ def run() -> list[dict]:
         duration = duration_map.get(ticker, "")
 
         if ticker not in todays_entries:
-            # Opened on a previous day — always hold
-            to_hold.append((p, "swing (prev day)"))
-        elif _is_short_term(duration):
+            # Opened on a previous day — hold until its natural exit
+            to_hold.append((p, f"prev day ({duration})"))
+        elif _is_eod_close(duration):
+            # Genuinely 1-day trade — close at EOD
             to_close.append(p)
         else:
-            # Opened today but swing duration — hold overnight
-            to_hold.append((p, f"swing today ({duration or 'no duration'})"))
+            # Opened today but holds 2d, 3d, 5-7d etc — respect its duration
+            to_hold.append((p, f"{duration or 'no duration'}"))
 
     print(f"[close_intraday] {len(positions)} positions:")
     print(f"  Closing  : {len(to_close)}")
