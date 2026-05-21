@@ -109,6 +109,27 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
     mode = "LIVE" if is_live_mode() else "PAPER"
     side = "buy" if direction == "bullish" else "sell"
 
+    # For short orders, verify the asset is actually shortable on Alpaca
+    # before attempting — avoids code 42210000 "asset cannot be sold short"
+    if side == "sell":
+        try:
+            asset = _get_client().get_asset(ticker)
+            if not getattr(asset, "shortable", False):
+                print(f"[alpaca] {ticker} is not shortable on Alpaca — skipping bearish order")
+                return {"status": "skipped",
+                        "reason": f"{ticker} is not shortable on Alpaca",
+                        "ticker": ticker}
+            if not getattr(asset, "easy_to_borrow", False):
+                print(f"[alpaca] {ticker} is hard-to-borrow — skipping bearish order")
+                return {"status": "skipped",
+                        "reason": f"{ticker} is hard-to-borrow",
+                        "ticker": ticker}
+        except Exception as e:
+            print(f"[alpaca] Could not verify shortability for {ticker}: {e} — skipping")
+            return {"status": "skipped",
+                    "reason": f"Could not verify shortability for {ticker}",
+                    "ticker": ticker}
+
     # Get current price to calculate SL/TP and convert notional → shares
     price = get_current_price(ticker)
 
