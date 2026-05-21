@@ -584,28 +584,36 @@ def live_alpaca():
                 st.rerun()
 
     if positions:
-        # Cross-ref trades DB for SL/TP when Alpaca legs aren't populated
+        # Cross-ref trades DB for SL/TP and entry timestamp
         _trade_sl_tp = {}
         try:
-            _recent_trades = load_trades()[:30] if db_ok else []
+            from datetime import date as _date
+            _today_str = _date.today().isoformat()
+            _recent_trades = load_trades()[:50] if db_ok else []
             for _t in _recent_trades:
                 _tk = _t.get("ticker","")
-                if _tk and _t.get("stop_loss") and _t.get("take_profit"):
-                    _trade_sl_tp[_tk] = {
-                        "stop_loss":   float(_t["stop_loss"]),
-                        "take_profit": float(_t["take_profit"]),
-                    }
+                if not _tk:
+                    continue
+                _trade_sl_tp.setdefault(_tk, {})
+                if _t.get("stop_loss") and _t.get("take_profit"):
+                    _trade_sl_tp[_tk]["stop_loss"]   = float(_t["stop_loss"])
+                    _trade_sl_tp[_tk]["take_profit"]  = float(_t["take_profit"])
+                # Capture the most recent entry timestamp for this ticker
+                if _t.get("timestamp") and "entry_ts" not in _trade_sl_tp[_tk]:
+                    _trade_sl_tp[_tk]["entry_ts"] = str(_t["timestamp"])[:10]  # YYYY-MM-DD
         except Exception:
             pass
 
+        _GRID = "80px 76px 55px 70px 1fr 1fr 1fr 1fr 1fr"
+
         # Column header row
         st.markdown(
-            f'<div style="display:grid;grid-template-columns:80px 55px 70px 1fr 1fr 1fr 1fr 1fr 70px;'
+            f'<div style="display:grid;grid-template-columns:{_GRID} 70px;'
             f'gap:0 16px;padding:6px 14px;border-radius:6px 6px 0 0;'
             f'background:rgba(0,180,255,0.04);margin-bottom:1px;">'
             + "".join(f'<span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
                       f'text-transform:uppercase;color:{TEXT3};">{h}</span>'
-                      for h in ["Ticker","Side","Shares","Entry","Current","Stop Loss","Take Profit","P&L",""])
+                      for h in ["Ticker","Type","Side","Shares","Entry","Current","Stop Loss","Take Profit","P&L",""])
             + f'</div>',
             unsafe_allow_html=True
         )
@@ -631,14 +639,40 @@ def live_alpaca():
             sl_str = f'<span style="color:{RED};font-family:JetBrains Mono,monospace;">${sl:.2f}</span>' if sl else f'<span style="color:{TEXT3};">—</span>'
             tp_str = f'<span style="color:{GREEN};font-family:JetBrains Mono,monospace;">${tp:.2f}</span>' if tp else f'<span style="color:{TEXT3};">—</span>'
 
+            # Trade type badge — intraday (opened today) vs swing (opened earlier)
+            entry_ts = _trade_sl_tp.get(ticker_p, {}).get("entry_ts", "")
+            if entry_ts == _today_str:
+                type_lbl = "INTRADAY"
+                type_bg  = "rgba(255,170,0,0.12)"
+                type_bc  = "rgba(255,170,0,0.4)"
+                type_tc  = AMBER
+            else:
+                try:
+                    from datetime import datetime as _dt
+                    days_held = (_dt.today() - _dt.fromisoformat(entry_ts)).days if entry_ts else 0
+                    day_str   = f" · D{days_held}" if days_held > 0 else ""
+                except Exception:
+                    day_str = ""
+                type_lbl = f"SWING{day_str}"
+                type_bg  = "rgba(0,212,255,0.08)"
+                type_bc  = "rgba(0,212,255,0.3)"
+                type_tc  = GLOW
+
+            type_badge = (
+                f'<span style="background:{type_bg};border:1px solid {type_bc};color:{type_tc};'
+                f'font-size:8px;font-weight:800;letter-spacing:0.8px;padding:2px 6px;'
+                f'border-radius:3px;white-space:nowrap;">{type_lbl}</span>'
+            )
+
             row_col, btn_col = st.columns([9, 1])
             with row_col:
                 st.markdown(
-                    f'<div style="display:grid;grid-template-columns:80px 55px 70px 1fr 1fr 1fr 1fr 1fr;'
+                    f'<div style="display:grid;grid-template-columns:{_GRID};'
                     f'gap:0 16px;align-items:center;padding:10px 14px;'
                     f'background:{SURF};border:1px solid rgba(0,180,255,0.08);'
                     f'border-radius:6px;margin-bottom:4px;transition:border-color 0.15s;">'
                     f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;color:{GLOW};">{ticker_p}</span>'
+                    f'<span>{type_badge}</span>'
                     f'<span style="background:{side_c};border:1px solid {side_bc};color:{side_tc};'
                     f'font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 6px;border-radius:3px;">{side_lbl}</span>'
                     f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;color:{TEXT};">{p["qty"]:.0f}</span>'
