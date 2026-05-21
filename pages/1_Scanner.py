@@ -496,6 +496,20 @@ def live_alpaca():
     st.session_state["_live_positions"]      = len(positions)
     st.session_state["_live_positions_data"] = positions
 
+    # Realized P&L for goal bar — computed fresh every 30s
+    _realized_goal = 0.0
+    try:
+        if alpaca_ok:
+            from execution.alpaca import get_closed_trade_pnl
+            from datetime import date as _d
+            _today_str = _d.today().isoformat()
+            for _cp in get_closed_trade_pnl(days=1):
+                if _cp.get("closed_at","")[:10] == _today_str:
+                    _realized_goal += _cp["realized_pnl"]
+    except Exception:
+        pass
+    st.session_state["_realized_pl"] = _realized_goal
+
     # ── Metric strip ──────────────────────────────────────────────────────────
     def mc(label, val, sub, color=TEXT3, tip=""):
         tip_html = f'<div class="tip">{tip}</div>' if tip else ""
@@ -935,57 +949,101 @@ else:
 from calendar import monthrange
 from config import MONTHLY_TARGET_PCT, BANKROLL
 
-today_g       = datetime.today()
-days_in_month = monthrange(today_g.year, today_g.month)[1]
-day_of_month  = today_g.day
-days_left     = days_in_month - day_of_month
-trading_days  = 21
-trading_day   = round(day_of_month / days_in_month * trading_days)
-target_dollars= BANKROLL * MONTHLY_TARGET_PCT
-month_pl      = st.session_state.get("_live_pl", 0)
-progress_pct  = max(0, min(100, (month_pl / target_dollars * 100) if target_dollars else 0))
-on_pace       = target_dollars * (trading_day / trading_days)
-pace_diff     = month_pl - on_pace
-pace_color    = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
-bar_color     = GREEN if progress_pct >= 70 else AMBER if progress_pct >= 30 else RED
-pace_lbl      = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
+today_g        = datetime.today()
+days_in_month  = monthrange(today_g.year, today_g.month)[1]
+day_of_month   = today_g.day
+days_left      = days_in_month - day_of_month
+trading_days   = 21
+trading_day    = round(day_of_month / days_in_month * trading_days)
+target_dollars = BANKROLL * MONTHLY_TARGET_PCT
+
+# Pull fresh values set by the live fragment (updates every 30s)
+realized_pl   = st.session_state.get("_realized_pl", 0.0)   # locked in — closed trades
+unrealized_pl = st.session_state.get("_live_pl", 0.0)        # floating — open positions
+total_pl_goal = realized_pl + unrealized_pl
+
+# Progress bar: two segments
+realized_pct   = max(0, min(100, realized_pl   / target_dollars * 100)) if target_dollars else 0
+unrealized_pct = max(0, min(100 - realized_pct, unrealized_pl / target_dollars * 100)) if target_dollars else 0
+total_pct      = realized_pct + unrealized_pct
+
+on_pace    = target_dollars * (trading_day / trading_days)
+pace_diff  = total_pl_goal - on_pace
+pace_color = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
+pace_lbl   = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
+
+rl_sign = "+" if realized_pl   >= 0 else ""
+ul_sign = "+" if unrealized_pl >= 0 else ""
 
 st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 st.markdown(f"""
 <div style="background:linear-gradient(135deg,rgba(0,255,136,0.04),rgba(0,180,255,0.03));
      border:1px solid rgba(0,255,136,0.15);border-radius:10px;padding:18px 22px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+
+  <!-- Header row -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
     <div>
-      <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:{TEXT2};margin-bottom:5px;">
-        Monthly Goal — {today_g.strftime('%B %Y')}
+      <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:{TEXT2};margin-bottom:8px;">
+        Monthly Goal — {today_g.strftime('%B %Y')} &nbsp;·&nbsp; ${target_dollars:,.0f} target (10%)
       </div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;color:{bar_color};">
-        ${month_pl:+,.0f}
-        <span style="font-size:14px;font-weight:400;color:{TEXT2};">&nbsp;of&nbsp; ${target_dollars:,.0f} &nbsp;(10%)</span>
+      <!-- Two P&L numbers side by side -->
+      <div style="display:flex;align-items:center;gap:24px;">
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+               color:{GREEN};margin-bottom:3px;">🔒 Realized (Closed)</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GREEN};">
+            {rl_sign}${abs(realized_pl):,.0f}
+          </div>
+        </div>
+        <div style="color:{TEXT3};font-size:20px;">+</div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+               color:{GLOW};margin-bottom:3px;">📈 Unrealized (Open)</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GLOW};">
+            {ul_sign}${abs(unrealized_pl):,.0f}
+          </div>
+        </div>
+        <div style="color:{TEXT3};font-size:20px;">=</div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+               color:{TEXT2};margin-bottom:3px;">Total</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;
+               color:{'#00ff88' if total_pl_goal > 0 else '#ff2d78' if total_pl_goal < 0 else TEXT2};">
+            {"+" if total_pl_goal >= 0 else ""}${abs(total_pl_goal):,.0f}
+          </div>
+        </div>
       </div>
     </div>
-    <div style="text-align:right;display:flex;gap:32px;">
+    <div style="text-align:right;display:flex;gap:28px;align-items:flex-start;margin-top:4px;">
       <div>
         <div style="font-size:10px;color:{TEXT3};font-weight:600;letter-spacing:1px;text-transform:uppercase;">Pace</div>
-        <div style="font-size:14px;font-weight:700;color:{pace_color};margin-top:3px;">{pace_lbl}</div>
+        <div style="font-size:13px;font-weight:700;color:{pace_color};margin-top:3px;">{pace_lbl}</div>
       </div>
       <div>
         <div style="font-size:10px;color:{TEXT3};font-weight:600;letter-spacing:1px;text-transform:uppercase;">Days Left</div>
-        <div style="font-size:14px;font-weight:700;color:{TEXT};margin-top:3px;">{days_left} days</div>
+        <div style="font-size:13px;font-weight:700;color:{TEXT};margin-top:3px;">{days_left} days</div>
       </div>
       <div>
         <div style="font-size:10px;color:{TEXT3};font-weight:600;letter-spacing:1px;text-transform:uppercase;">Still Need</div>
-        <div style="font-size:14px;font-weight:700;color:{TEXT};margin-top:3px;">${max(0,target_dollars - month_pl):,.0f}</div>
+        <div style="font-size:13px;font-weight:700;color:{TEXT};margin-top:3px;">${max(0, target_dollars - total_pl_goal):,.0f}</div>
       </div>
     </div>
   </div>
-  <div style="height:10px;background:rgba(0,180,255,0.08);border-radius:5px;overflow:hidden;">
-    <div style="height:10px;width:{progress_pct:.1f}%;background:{bar_color};border-radius:5px;
-         box-shadow:0 0 12px {bar_color}88;transition:width 0.6s ease;"></div>
+
+  <!-- Two-segment progress bar -->
+  <div style="height:10px;background:rgba(0,180,255,0.08);border-radius:5px;overflow:hidden;display:flex;">
+    <div style="height:10px;width:{realized_pct:.2f}%;background:{GREEN};
+         box-shadow:0 0 10px {GREEN}88;flex-shrink:0;"></div>
+    <div style="height:10px;width:{unrealized_pct:.2f}%;background:rgba(0,212,255,0.5);
+         flex-shrink:0;"></div>
   </div>
-  <div style="display:flex;justify-content:space-between;margin-top:6px;">
+  <div style="display:flex;justify-content:space-between;margin-top:6px;align-items:center;">
     <span style="font-size:11px;color:{TEXT3};">$0</span>
-    <span style="font-size:12px;font-weight:700;color:{bar_color};">{progress_pct:.1f}% complete</span>
+    <div style="display:flex;gap:16px;align-items:center;">
+      <span style="font-size:10px;color:{GREEN};">■ Realized</span>
+      <span style="font-size:10px;color:{GLOW};">■ Unrealized</span>
+      <span style="font-size:12px;font-weight:700;color:{TEXT2};">{total_pct:.1f}% complete</span>
+    </div>
     <span style="font-size:11px;color:{TEXT3};">${target_dollars:,.0f}</span>
   </div>
 </div>
