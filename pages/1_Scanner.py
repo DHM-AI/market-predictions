@@ -911,38 +911,39 @@ else:
         f'{hdr_html}{rows_html}</div>',
         unsafe_allow_html=True)
 
-# ── MONTHLY GOAL BAR (bottom of page) ─────────────────────────────────────────
-from calendar import monthrange
-from config import MONTHLY_TARGET_PCT, BANKROLL
+# ── MONTHLY GOAL BAR (bottom of page — live fragment, refreshes every 30s) ─────
+@st.fragment(run_every=30)
+def live_goal_bar():
+    from calendar import monthrange
+    from config import MONTHLY_TARGET_PCT, BANKROLL
 
-today_g        = datetime.today()
-days_in_month  = monthrange(today_g.year, today_g.month)[1]
-day_of_month   = today_g.day
-days_left      = days_in_month - day_of_month
-trading_days   = 21
-trading_day    = round(day_of_month / days_in_month * trading_days)
-target_dollars = BANKROLL * MONTHLY_TARGET_PCT
+    today_g        = datetime.today()
+    days_in_month  = monthrange(today_g.year, today_g.month)[1]
+    day_of_month   = today_g.day
+    days_left      = days_in_month - day_of_month
+    trading_days   = 21
+    trading_day    = round(day_of_month / days_in_month * trading_days)
+    target_dollars = BANKROLL * MONTHLY_TARGET_PCT
 
-# Pull fresh values set by the live fragment (updates every 30s)
-realized_pl   = st.session_state.get("_realized_pl", 0.0)   # locked in — closed trades
-unrealized_pl = st.session_state.get("_live_pl", 0.0)        # floating — open positions
-total_pl_goal = realized_pl + unrealized_pl
+    # Read fresh values set by live_alpaca() fragment (both run every 30s)
+    realized_pl   = st.session_state.get("_realized_pl", 0.0)
+    unrealized_pl = st.session_state.get("_live_pl", 0.0)
+    total_pl_goal = realized_pl + unrealized_pl
 
-# Progress bar: two segments
-realized_pct   = max(0, min(100, realized_pl   / target_dollars * 100)) if target_dollars else 0
-unrealized_pct = max(0, min(100 - realized_pct, unrealized_pl / target_dollars * 100)) if target_dollars else 0
-total_pct      = realized_pct + unrealized_pct
+    realized_pct   = max(0, min(100, realized_pl   / target_dollars * 100)) if target_dollars else 0
+    unrealized_pct = max(0, min(100 - realized_pct, unrealized_pl / target_dollars * 100)) if target_dollars else 0
+    total_pct      = realized_pct + unrealized_pct
 
-on_pace    = target_dollars * (trading_day / trading_days)
-pace_diff  = total_pl_goal - on_pace
-pace_color = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
-pace_lbl   = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
+    on_pace    = target_dollars * (trading_day / trading_days)
+    pace_diff  = total_pl_goal - on_pace
+    pace_color = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
+    pace_lbl   = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
 
-rl_sign = "+" if realized_pl   >= 0 else ""
-ul_sign = "+" if unrealized_pl >= 0 else ""
+    rl_sign = "+" if realized_pl   >= 0 else ""
+    ul_sign = "+" if unrealized_pl >= 0 else ""
 
-st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-st.markdown(f"""
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+    st.markdown(f"""
 <div style="background:linear-gradient(135deg,rgba(0,255,136,0.04),rgba(0,180,255,0.03));
      border:1px solid rgba(0,255,136,0.15);border-radius:10px;padding:18px 22px;">
 
@@ -952,7 +953,6 @@ st.markdown(f"""
       <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:{TEXT2};margin-bottom:8px;">
         Monthly Goal — {today_g.strftime('%B %Y')} &nbsp;·&nbsp; ${target_dollars:,.0f} target (10%)
       </div>
-      <!-- Two P&L numbers side by side -->
       <div style="display:flex;align-items:center;gap:24px;">
         <div>
           <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
@@ -1014,6 +1014,8 @@ st.markdown(f"""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+live_goal_bar()
 
 # ── Smart tooltip positioning ──────────────────────────────────────────────────
 st.markdown("""
