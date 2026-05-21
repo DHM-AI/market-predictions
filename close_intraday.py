@@ -39,6 +39,33 @@ def _get_todays_entries() -> set[str]:
         return set()
 
 
+def _get_intraday_tickers_from_db(tickers: set[str]) -> set[str]:
+    """
+    Cross-reference predictions DB to find tickers whose duration is
+    explicitly 1-day (true intraday). Swing trades opened today are
+    NOT included — they should be held overnight.
+
+    Duration strings that mean intraday: "1d", "intraday", "same-day"
+    Everything else ("1-3d", "5-7d", "2-3w", etc.) = swing → hold.
+    """
+    intraday_keywords = ("1d", "intraday", "same-day", "same day")
+    try:
+        import db
+        if db.db_available():
+            today_str = date.today().isoformat()
+            rows = db.load_predictions_for_date(today_str)
+            return {
+                r["ticker"] for r in rows
+                if r.get("ticker") in tickers
+                and any(kw in str(r.get("duration", "")).lower()
+                        for kw in intraday_keywords)
+            }
+    except Exception as e:
+        print(f"[close_intraday] DB lookup failed ({e}) — using date-only filter")
+    # Fallback: if DB unavailable, return empty set (never close anything blindly)
+    return set()
+
+
 def run() -> list[dict]:
     if not is_configured():
         print("[close_intraday] Alpaca not configured — skipping.")
@@ -51,12 +78,18 @@ def run() -> list[dict]:
         print("[close_intraday] No open positions.")
         return []
 
-    intraday = [p for p in positions if p["ticker"] in todays_entries]
-    swing    = [p for p in positions if p["ticker"] not in todays_entries]
+    # Among positions opened today, only close those explicitly flagged
+    # as intraday in the predictions DB.
+    # Swing trades opened today are held overnight — do NOT close them.
+    opened_today   = {p["ticker"] for p in positions if p["ticker"] in todays_entries}
+    intraday_ticks = _get_intraday_tickers_from_db(opened_today)
+
+    intraday = [p for p in positions if p["ticker"] in intraday_ticks]
+    swing    = [p for p in positions if p["ticker"] not in intraday_ticks]
 
     print(f"[close_intraday] {len(positions)} open positions:")
-    print(f"  INTRADAY (opened today) : {len(intraday)} → will close")
-    print(f"  SWING (multi-day)       : {len(swing)} → will hold overnight")
+    print(f"  TRUE INTRADAY (1d duration, opened today): {len(intraday)} → will close")
+    print(f"  SWING (multi-day OR opened today as swing): {len(swing)} → will hold overnight")
 
     results = []
     for p in intraday:
