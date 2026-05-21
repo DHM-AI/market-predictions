@@ -28,7 +28,10 @@ def get_sp500_tickers() -> list[str]:
 
 
 def get_universe() -> list[str]:
-    return get_sp500_tickers() + FUTURES
+    from config import WATCHLIST
+    sp500  = get_sp500_tickers()
+    extras = [t for t in WATCHLIST if t not in sp500]  # avoid duplicates
+    return sp500 + extras + FUTURES
 
 
 def _get_fallback_tickers() -> list[str]:

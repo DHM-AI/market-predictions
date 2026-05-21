@@ -24,6 +24,12 @@ ALPACA_LIVE_MODE  = os.getenv("ALPACA_LIVE_MODE", "false").lower() == "true"
 # ── Universe ──────────────────────────────────────────────────────────────────
 FUTURES = ["ES=F", "NQ=F", "RTY=F", "CL=F", "GC=F", "ZB=F"]
 
+# ── Watchlist — always scanned even if not in S&P 500 ─────────────────────────
+# Add any ticker here to force it into every scan.
+WATCHLIST = [
+    "AAL",   # American Airlines — removed from S&P 500 in 2020, still high volume
+]
+
 # ── Signal thresholds ─────────────────────────────────────────────────────────
 BB_SQUEEZE_PERCENTILE  = 10
 ATR_COMPRESSION_RATIO  = 0.75
