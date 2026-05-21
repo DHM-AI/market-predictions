@@ -186,7 +186,7 @@ st.markdown(
     f'</div>'
     f'<div class="kpi" style="--kc:rgba(0,180,255,0.2);">'
     f'<div class="kpi-lbl">RSI (14)</div>'
-    f'<div class="kpi-val" style="color:{"' + RED + '" if rsi_val > 70 else "' + GREEN + '" if rsi_val < 30 else TEXT};">{rsi_val:.1f}</div>'
+    f'<div class="kpi-val" style="color:{RED if rsi_val > 70 else (GREEN if rsi_val < 30 else TEXT)};">{rsi_val:.1f}</div>'
     f'<div class="kpi-sub">{"Overbought" if rsi_val > 70 else "Oversold" if rsi_val < 30 else "Neutral"}</div>'
     f'</div>'
     f'<div class="kpi" style="--kc:rgba(0,255,136,0.2);">'

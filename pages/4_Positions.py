@@ -225,9 +225,10 @@ if not positions:
     )
 else:
     # Column headers
+    _hdr_cells = "".join(f'<div class="tbl-lbl">{h}</div>' for h in ["Ticker","Side","Value","Entry","Current","P&L","SL / TP","Close"])
     st.markdown(
         f'<div class="pos-card" style="background:rgba(0,180,255,0.03);border-color:rgba(0,180,255,0.06);">'
-        f'{"".join(f"<div class=\"tbl-lbl\">{h}</div>" for h in ["Ticker","Side","Value","Entry","Current","P&L","SL / TP","Close"])}'
+        f'{_hdr_cells}'
         f'</div>',
         unsafe_allow_html=True
     )
