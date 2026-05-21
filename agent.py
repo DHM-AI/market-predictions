@@ -254,7 +254,7 @@ def run_scan(send_email: bool = True,
 
     # Email digest
     if send_email:
-        send_daily_digest(picks_df.head(TOP_N_CLAUDE_ANALYSIS), explanations)
+        send_daily_digest(picks_df.head(10), explanations)  # Slack supports up to 10
 
     elapsed = time.time() - start
     print(f"\n{'='*62}")

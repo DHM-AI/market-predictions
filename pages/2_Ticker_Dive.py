@@ -333,13 +333,13 @@ st.markdown('<div class="sec">AI Analysis</div>', unsafe_allow_html=True)
 if st.button("✦  Generate Claude Analysis", type="primary"):
     try:
         from analyst.claude_analyst import stream_explanation
-        st.markdown(
-            f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.12);'
-            f'border-radius:8px;padding:18px;margin-top:8px;">',
-            unsafe_allow_html=True
-        )
-        with st.chat_message("assistant"):
+        with st.container():
+            st.markdown(
+                f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.12);'
+                f'border-radius:8px;padding:18px;margin-top:8px;color:{TEXT};">',
+                unsafe_allow_html=True
+            )
             st.write_stream(stream_explanation(result))
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
     except Exception as e:
         st.error(f"Analysis unavailable: {e}")

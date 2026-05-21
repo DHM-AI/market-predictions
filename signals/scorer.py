@@ -158,6 +158,7 @@ def score_ticker(
     else:
         breakdown["short_squeeze"] = 0
 
+    raw_score  = min(raw_score, 100)   # hard cap — weights can exceed 100 with bonuses
     direction  = _determine_direction(technicals, sentiment)
     duration   = _determine_duration(technicals, earnings_days)
     confidence = _determine_confidence(raw_score)

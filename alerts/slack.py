@@ -207,7 +207,7 @@ def send_trade_alert(result: dict) -> bool:
     Fire immediately when a bracket order is placed.
     result: dict returned by execution.alpaca.place_order()
     """
-    if not result or result.get("status") not in ("submitted", "error"):
+    if not result or result.get("status") not in ("submitted", "error", "halted"):
         return False
 
     status = result.get("status", "unknown")
@@ -220,6 +220,9 @@ def send_trade_alert(result: dict) -> bool:
     tp     = result.get("take_profit")
     dollar = result.get("dollar_amount", 0)
     reason = result.get("reason", "")
+
+    if status == "halted":
+        return _post({"text": f"🛑 *Trading HALTED — daily loss limit hit*\n>{result.get('reason','')}"})
 
     if status == "error":
         payload = {

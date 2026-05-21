@@ -35,7 +35,7 @@ CACHE_MINUTES = 30
 def _is_cache_fresh() -> bool:
     if _cache_ts is None:
         return False
-    return (datetime.now() - _cache_ts).seconds < CACHE_MINUTES * 60
+    return (datetime.now() - _cache_ts).total_seconds() < CACHE_MINUTES * 60
 
 
 def get_market_regime(force_refresh: bool = False) -> dict:
@@ -93,8 +93,10 @@ def _fetch_regime() -> dict:
             spy_df.columns = spy_df.columns.get_level_values(0)
 
         spy_close = float(spy_df["Close"].iloc[-1]) if not spy_df.empty else 500.0
-        spy_ma50  = float(spy_df["Close"].rolling(50).mean().iloc[-1])  if len(spy_df) >= 50  else spy_close
-        spy_ma200 = float(spy_df["Close"].rolling(200).mean().iloc[-1]) if len(spy_df) >= 200 else spy_close
+        spy_ma50  = float(spy_df["Close"].rolling(50).mean().dropna().iloc[-1])  if len(spy_df) >= 50  else spy_close
+        spy_ma200 = float(spy_df["Close"].rolling(200).mean().dropna().iloc[-1]) if len(spy_df) >= 200 else spy_close
+        if spy_ma50  != spy_ma50:  spy_ma50  = spy_close   # NaN guard
+        if spy_ma200 != spy_ma200: spy_ma200 = spy_close   # NaN guard
 
         spy_vs_50ma_pct  = round((spy_close / spy_ma50  - 1) * 100, 2)
         spy_vs_200ma_pct = round((spy_close / spy_ma200 - 1) * 100, 2)

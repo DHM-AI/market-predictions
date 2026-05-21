@@ -52,6 +52,7 @@ def get_account() -> dict:
         "portfolio_value": float(acct.portfolio_value),
         "cash":            float(acct.cash),
         "equity":          float(acct.equity),
+        "last_equity":     float(acct.last_equity) if acct.last_equity else float(acct.equity),
         "paper":           not ALPACA_LIVE_MODE,
     }
 
@@ -211,7 +212,9 @@ def get_positions() -> list[dict]:
         client    = _get_client()
         positions = client.get_all_positions()
         # Get open bracket orders to find SL/TP levels
-        orders    = client.get_orders()
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        orders    = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
         sl_tp_map = {}  # ticker → {stop_loss, take_profit}
         for o in orders:
             sym = o.symbol
@@ -269,8 +272,10 @@ def cancel_all_orders() -> int:
     if not is_configured():
         return 0
     try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
         client = _get_client()
-        orders = client.get_orders()
+        orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
         for o in orders:
             try:
                 client.cancel_order_by_id(str(o.id))

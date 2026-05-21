@@ -270,6 +270,8 @@ if st.session_state.get("_refreshing"):
 
 n_picks = len(picks_df) if picks_df is not None and not picks_df.empty else 0
 n_auto  = int((picks_df["score"] >= 70).sum()) if picks_df is not None and not picks_df.empty and "score" in picks_df.columns else 0
+st.session_state["_n_picks"] = n_picks
+st.session_state["_n_auto"]  = n_auto
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def stars(score):
@@ -453,7 +455,8 @@ def _next_scan_label() -> str:
             diff = int((nxt - now).total_seconds())
             h, m = divmod(diff // 60, 60)
             countdown = f"in {h}h {m}m" if h else f"in {m}m"
-            return f"{nxt.strftime('%-I:%M %p')} ET · {countdown}"
+            hour = nxt.hour % 12 or 12
+            return f"{hour}:{nxt.strftime('%M %p')} ET · {countdown}"
         else:
             # All done today — show tomorrow's first scan
             from datetime import timedelta
@@ -478,6 +481,10 @@ def live_alpaca():
             positions = get_positions()
     except Exception:
         pass
+
+    # Re-read pick counts from session state so they reflect latest scan
+    _n_picks = st.session_state.get("_n_picks", n_picks)
+    _n_auto  = st.session_state.get("_n_auto",  n_auto)
 
     portfolio    = acct.get("portfolio_value", 0)
     buying_power = acct.get("buying_power", 0)
@@ -509,11 +516,11 @@ def live_alpaca():
              "Live profit/loss on open positions. Not realized until closed.")
         + mc("Buying Power",    f"${buying_power:,.0f}",        "Available now",
              TEXT, "Cash you can deploy into new positions right now.")
-        + mc("AI Setups Today", str(n_picks) if n_picks else "—", "Score ≥ 50",
-             GREEN if n_picks else TEXT2,
+        + mc("AI Setups Today", str(_n_picks) if _n_picks else "—", "Score ≥ 50",
+             GREEN if _n_picks else TEXT2,
              "Tickers flagged today. Agent scans 7× daily: 7AM · 9AM · 10:30AM · 12PM · 2PM · 3:30PM · 4PM ET.")
-        + mc("Auto-Executing",  str(n_auto) if n_auto else "0", "Score ≥ 70",
-             GREEN if n_auto else TEXT2,
+        + mc("Auto-Executing",  str(_n_auto) if _n_auto else "0", "Score ≥ 70",
+             GREEN if _n_auto else TEXT2,
              "These will be auto-traded via Alpaca bracket orders.")
         + mc("Market Clock",
              _market_clock(),
@@ -682,9 +689,9 @@ with left:
                 # Calculate position size if not stored
                 if kelly == 0:
                     try:
-                        from config import BANKROLL, MAX_POSITION_PCT, KELLY_FRACTION
+                        from config import BANKROLL, MAX_POSITION_PCT, KELLY_FRACTION, KELLY_WIN_PCT, KELLY_LOSS_PCT
                         win_p = min(0.75, max(0.35, score / 100 * 0.5 + 0.25))
-                        b     = 0.07 / 0.03
+                        b     = KELLY_WIN_PCT / KELLY_LOSS_PCT
                         f     = max(0, (win_p * b - (1 - win_p)) / b)
                         kelly = round(min(BANKROLL * f * KELLY_FRACTION, BANKROLL * MAX_POSITION_PCT) / 100) * 100
                     except Exception:

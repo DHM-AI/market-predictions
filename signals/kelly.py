@@ -28,8 +28,8 @@ def kelly_fraction(win_prob: float,
     win_pct:  expected gain if win (e.g. 0.05 for 5%)
     loss_pct: expected loss if wrong (e.g. 0.03 for 3%)
     """
-    win_pct = win_pct or KELLY_WIN_PCT
-    loss_pct = loss_pct or KELLY_LOSS_PCT
+    win_pct  = win_pct  if win_pct  is not None else KELLY_WIN_PCT
+    loss_pct = loss_pct if loss_pct is not None else KELLY_LOSS_PCT
     if win_prob <= 0 or win_prob >= 1 or loss_pct == 0:
         return 0.0
     b = win_pct / loss_pct   # win/loss ratio
@@ -91,6 +91,11 @@ def annotate_picks(picks_df, bankroll: float = None):
         return picks_df
 
     bankroll = bankroll or BANKROLL
+
+    # Drop any pre-existing sizing columns to prevent duplicate columns on re-runs
+    sizing_cols = ["kelly_fraction", "dollar_amount", "pct_of_bankroll", "risk_level", "bankroll"]
+    picks_df = picks_df.drop(columns=[c for c in sizing_cols if c in picks_df.columns], errors="ignore")
+
     sizing = picks_df.apply(
         lambda row: position_size(
             win_prob=min(row.get("xgb_prob", row.get("score", 50) / 100), 0.99),

@@ -88,7 +88,11 @@ hr {{ border-color:rgba(0,180,255,0.08) !important; margin:16px 0 !important; }}
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
-from execution.alpaca import is_configured, is_live_mode
+try:
+    from execution.alpaca import is_configured, is_live_mode
+except ImportError:
+    def is_configured(): return False
+    def is_live_mode():  return False
 
 mode_label = "🔴 LIVE TRADING" if (is_configured() and is_live_mode()) else "📄 PAPER TRADING"
 mode_color = RED if (is_configured() and is_live_mode()) else AMBER

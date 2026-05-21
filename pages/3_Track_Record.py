@@ -285,8 +285,6 @@ if not evaluated.empty and len(evaluated) >= 5:
         section_header("SIGNAL WIN RATE")
 
         sig_rows = []
-        signal_col = evaluated.get("signals_triggered", pd.Series([[]]*len(evaluated)))
-
         for _, row in evaluated.iterrows():
             signals = row.get("signals_triggered", []) or []
             if isinstance(signals, str):
@@ -489,12 +487,12 @@ for _, row in display.iterrows():
     move = row.get("actual_move_5d", None)
     pl   = row.get("trade_pl", None)
 
-    if pd.isna(move) if move is not None else True:
+    if move is None or (hasattr(move, '__class__') and pd.isna(move)):
         move_str = '<span style="color:#333;">Pending</span>'
     else:
         hit    = abs(move) >= MOVE_TARGET_PCT * 100
         color  = "#00ff88" if hit else "#5a8a9f"
-        arrow  = "▲" if move > 0 else "▼"
+        arrow  = "▲" if move > 0 else "▼" if move < 0 else "→"
         move_str = f'<span style="color:{color};font-family:JetBrains Mono,monospace;">{arrow} {abs(move):.1f}%</span>'
 
     if pl is not None and not pd.isna(pl):

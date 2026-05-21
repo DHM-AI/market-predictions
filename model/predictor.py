@@ -35,11 +35,13 @@ def _xgb_prob(df: pd.DataFrame) -> float:
     if model is None or df.empty:
         return 0.0
     try:
+        if not _feature_names:
+            return 0.0
         features = compute_feature_row(df)
         row = [features.get(col, 0.0) for col in _feature_names]
         X = np.array(row).reshape(1, -1)
         prob = float(model.predict_proba(X)[0][1])
-        return prob
+        return max(0.0, min(1.0, prob))
     except Exception:
         return 0.0
 
@@ -73,8 +75,8 @@ def predict_universe(
         # Get XGB probability (0-1)
         xgb_prob = _xgb_prob(df)
 
-        # Normalize sentiment score to 0-1
-        sent_score_norm = normalize_score(sentiment.get("score", 0.0))
+        # Normalize sentiment score to 0-1, clamped to prevent overflow
+        sent_score_norm = max(0.0, min(1.0, normalize_score(sentiment.get("score", 0.0))))
 
         # Blend: weighted average → 0-100 scale
         blended = (XGB_WEIGHT * xgb_prob + SENTIMENT_WEIGHT * sent_score_norm) * 100

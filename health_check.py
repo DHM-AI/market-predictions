@@ -165,19 +165,18 @@ try:
                    f"{mode} · Portfolio ${portfolio:,.2f} · "
                    f"Buying power ${buying_power:,.2f}")
 
-        # Daily loss check
-        equity      = alpaca_acct.get("equity", portfolio)
-        # Compare to bankroll as baseline
-        daily_change_pct = (portfolio - BANKROLL) / BANKROLL
+        # Daily loss check — compare today's equity to yesterday's close
+        last_equity      = alpaca_acct.get("last_equity", portfolio)
+        daily_change_pct = (portfolio - last_equity) / last_equity if last_equity else 0
         if daily_change_pct < -DAILY_LOSS_LIMIT_PCT:
             report.add("Alpaca — Daily Loss Limit", "FAIL",
                        f"Down {abs(daily_change_pct):.1%} — exceeds {DAILY_LOSS_LIMIT_PCT:.0%} limit. Trading halted.")
         elif daily_change_pct < -(DAILY_LOSS_LIMIT_PCT * 0.5):
             report.add("Alpaca — Daily Loss Limit", "WARN",
-                       f"Down {abs(daily_change_pct):.1%} — approaching limit")
+                       f"Down {abs(daily_change_pct):.1%} today — approaching {DAILY_LOSS_LIMIT_PCT:.0%} limit")
         else:
             report.add("Alpaca — Daily Loss Limit", "PASS",
-                       f"P&L vs bankroll: {daily_change_pct:+.2%} — within limits")
+                       f"Daily P&L: {daily_change_pct:+.2%} — within limits")
 
         # Open positions
         n_pos = len(alpaca_positions)

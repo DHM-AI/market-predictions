@@ -226,7 +226,8 @@ def enrich_with_options(picks_df: pd.DataFrame, verbose: bool = True) -> pd.Data
         # Score adjustment
         adj = 0
         if flow["triggered"]:
-            if flow["side"] == direction[0:4]:  # "bull" matches "bullish"
+            _dir_prefix = {"bullish": "bull", "bearish": "bear"}.get(direction, "")
+        if flow["side"] == _dir_prefix and _dir_prefix:
                 adj = +5
                 if verbose:
                     print(f"confirms ({flow['detail']})", flush=True)

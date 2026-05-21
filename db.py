@@ -54,8 +54,9 @@ def _client() -> Client:
 
 # ── Predictions ───────────────────────────────────────────────────────────────
 
-def load_predictions() -> list[dict]:
-    result = _client().table("predictions").select("*").order("date", desc=True).execute()
+def load_predictions(limit: int = 2000) -> list[dict]:
+    result = (_client().table("predictions")
+              .select("*").order("date", desc=True).limit(limit).execute())
     return result.data or []
 
 
