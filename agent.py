@@ -29,7 +29,7 @@ from signals.market_regime import get_market_regime
 from signals.options_flow import enrich_with_options
 from model.predictor import predict_universe, model_available
 from analyst.claude_analyst import explain_picks
-from alerts.slack import send_daily_digest, send_trade_alert
+from alerts.slack import send_trade_alert
 from risk.portfolio_guard import check_trade, increment_daily_count
 from config import (TOP_N_CLAUDE_ANALYSIS, MIN_SCORE_TO_ALERT,
                     AUTO_EXECUTE_MIN_SCORE, BANKROLL, ENABLE_OPTIONS_FLOW)
@@ -252,9 +252,6 @@ def run_scan(send_email: bool = True,
         print("      Alpaca execution skipped (--no-trade)")
         trade_results = []
 
-    # Email digest
-    if send_email:
-        send_daily_digest(picks_df.head(10), explanations)  # Slack supports up to 10
 
     elapsed = time.time() - start
     print(f"\n{'='*62}")
