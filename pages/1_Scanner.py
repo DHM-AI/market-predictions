@@ -507,14 +507,14 @@ def live_alpaca():
             f'{tip_html}</div>'
         )
 
-    # Realized P&L — sum of today's closed bracket trades
+    # Realized P&L from closed trades today
     _realized_today = 0.0
     _closed_count   = 0
     try:
         if alpaca_ok:
             from execution.alpaca import get_closed_trade_pnl
-            from datetime import date
-            _today_str = date.today().isoformat()
+            from datetime import date as _date
+            _today_str = _date.today().isoformat()
             for cp in get_closed_trade_pnl(days=1):
                 if cp.get("closed_at", "")[:10] == _today_str:
                     _realized_today += cp["realized_pnl"]
@@ -522,27 +522,30 @@ def live_alpaca():
     except Exception:
         pass
 
+    # Total P&L today = realized (locked in) + unrealized (floating)
+    _total_today    = _realized_today + total_pl
+    _total_sign     = "+" if _total_today >= 0 else ""
+    _total_color    = GREEN if _total_today > 0 else RED if _total_today < 0 else TEXT2
+
     pl_sign    = "+" if total_pl >= 0 else ""
-    rl_sign    = "+" if _realized_today >= 0 else ""
-    rl_color   = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
+    _rl_sub    = (f"${abs(_realized_today):+,.0f} locked · ${abs(total_pl):+,.0f} floating"
+                  if _closed_count else f"{len(positions)} open positions floating")
 
     st.markdown(
-        f'<div class="metrics-row" style="grid-template-columns:repeat(7,1fr);">'
-        + mc("Portfolio Value",  f"${portfolio:,.0f}",           "Total equity",
+        f'<div class="metrics-row" style="grid-template-columns:repeat(6,1fr);">'
+        + mc("Portfolio Value",  f"${portfolio:,.0f}",            "Total equity",
              GLOW, "Total Alpaca account value — positions + cash.")
-        + mc("Realized P&L Today", f"{rl_sign}${abs(_realized_today):,.2f}",
-             f"{_closed_count} trade{'s' if _closed_count!=1 else ''} closed",
-             rl_color if _realized_today != 0 else TEXT2,
-             "Money actually banked today from closed bracket orders (stop loss or take profit hit).")
-        + mc("Open P&L",        f"{pl_sign}${total_pl:,.2f}",   f"{len(positions)} positions live",
-             pl_color if total_pl != 0 else TEXT2,
-             "Unrealized profit/loss on open positions. Fluctuates until positions close.")
-        + mc("Buying Power",    f"${buying_power:,.0f}",         "Available now",
+        + mc("Total P&L Today",  f"{_total_sign}${abs(_total_today):,.2f}",
+             _rl_sub,
+             _total_color if _total_today != 0 else TEXT2,
+             "Realized (closed trades) + unrealized (open positions) combined. "
+             "Realized is locked in; unrealized moves with the market.")
+        + mc("Buying Power",    f"${buying_power:,.0f}",          "Available now",
              TEXT, "Cash available for new positions right now.")
         + mc("AI Setups Today", str(_n_picks) if _n_picks else "—", "Score ≥ 50",
              GREEN if _n_picks else TEXT2,
              "Tickers flagged today. Agent scans 7× daily: 7AM · 9AM · 10:30AM · 12PM · 2PM · 3:30PM · 4PM ET.")
-        + mc("Auto-Executing",  str(_n_auto) if _n_auto else "0", "Score ≥ 70",
+        + mc("Auto-Executing",  str(_n_auto) if _n_auto else "0",  "Score ≥ 70",
              GREEN if _n_auto else TEXT2,
              "These will be auto-traded via Alpaca bracket orders.")
         + mc("Market Clock",
