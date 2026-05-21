@@ -72,12 +72,36 @@ def load_predictions_for_date(date_str: str) -> list[dict]:
     return result.data or []
 
 
+def _sanitize(v):
+    """Convert NaN / Infinity / nested objects to JSON-safe types."""
+    import math
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
+    if isinstance(v, list):
+        return "; ".join(str(i) for i in v)
+    if isinstance(v, dict):
+        return str(v)        # dicts (e.g. breakdown) become strings
+    # numpy scalars → Python native
+    try:
+        import numpy as np
+        if isinstance(v, (np.floating, np.integer)):
+            val = v.item()
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                return None
+            return val
+        if isinstance(v, np.bool_):
+            return bool(v)
+    except ImportError:
+        pass
+    return v
+
+
 def append_predictions(rows: list[dict]) -> None:
     if not rows:
         return
-    # Strip columns not in the DB schema
+    # Strip columns not in the DB schema + sanitize NaN/inf/nested types
     clean = [
-        {k: (v if not isinstance(v, list) else "; ".join(str(i) for i in v))
+        {k: _sanitize(v)
          for k, v in r.items()
          if k in _SCHEMA_COLS}
         for r in rows
