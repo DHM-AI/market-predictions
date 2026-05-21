@@ -65,7 +65,7 @@ today  = datetime.today().strftime("%Y-%m-%d")
 # ══════════════════════════════════════════════════════════════════════════════
 print(f"\n{BOLD}[1/7] Environment Variables{RESET}")
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 REQUIRED_VARS = {
     "ANTHROPIC_API_KEY":  "Claude analysis (non-fatal if missing)",
