@@ -109,9 +109,21 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
 
     # Get current price to calculate SL/TP and convert notional → shares
     price = get_current_price(ticker)
+
+    # Fallback: try yfinance if Alpaca data feed fails
     if price is None or price <= 0:
-        # Fallback: place simple market order without bracket
-        return _place_simple_order(ticker, dollar_amount, side, mode, reason)
+        try:
+            import yfinance as yf
+            hist = yf.download(ticker, period="1d", interval="1m", progress=False, auto_adjust=True)
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+                print(f"[alpaca] Used yfinance price for {ticker}: ${price:.2f}")
+        except Exception:
+            pass
+
+    if price is None or price <= 0:
+        print(f"[alpaca] Could not get price for {ticker} — skipping (no unprotected order placed)")
+        return {"status": "skipped", "reason": f"Could not fetch price for {ticker}"}
 
     qty = max(1, round(dollar_amount / price))
 
