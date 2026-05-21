@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Portfolio-level risk guard — prevents dangerous concentration before any new order.
 

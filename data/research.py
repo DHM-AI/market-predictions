@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Parallel research coordinator — runs all sentiment sources simultaneously.
 

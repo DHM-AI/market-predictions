@@ -58,10 +58,16 @@ def get_recent_ipos(months: int = 12, min_volume: int = 1_000_000) -> list[str]:
         from io import StringIO
         df = pd.read_csv(StringIO(resp.text))
 
-        # Filter to recent IPOs on major US exchanges
+        # Filter to recent IPOs on major US exchanges — clean tickers only
         df = df[df["ipoDate"] >= cutoff_str]
         df = df[df["exchange"].isin(["NYSE", "NASDAQ", "NYSE ARCA", "NASDAQ NMS"])]
         df = df[df["assetType"] == "Stock"]
+
+        # Exclude warrants, rights, units, SPACs and foreign listings
+        # Clean ticker = letters and digits only, or with a single hyphen (like BRK-B)
+        import re
+        _clean = re.compile(r'^[A-Z]{1,5}(-[A-Z])?$')
+        df = df[df["symbol"].apply(lambda s: bool(_clean.match(str(s))))]
 
         candidates = df["symbol"].tolist()
 

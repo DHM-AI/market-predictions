@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Market Regime Detection — prevents trading against the tape.
 

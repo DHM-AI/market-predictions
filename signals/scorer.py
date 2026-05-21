@@ -1,3 +1,4 @@
+from __future__ import annotations
 import pandas as pd
 from signals.technicals import compute_all
 from signals.sentiment import get_sentiment_with_velocity, normalize_score

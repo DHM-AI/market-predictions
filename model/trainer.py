@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Train XGBoost classifier on 3 years of S&P 500 history.
 
