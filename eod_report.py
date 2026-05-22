@@ -57,13 +57,29 @@ def run():
             for t in trades
         ) or ">None"
 
+    # Load tickers that had a partial exit (so we can flag half-size positions)
+    try:
+        from db import get_partial_exit_tickers
+        partial_exit_tickers = get_partial_exit_tickers()
+    except Exception:
+        partial_exit_tickers = set()
+
     # Overnight positions
-    overnight = "\n".join(
-        f">📌 *{p['ticker']}*  {'+' if p['unrealized_pl'] >= 0 else ''}"
-        f"{p['unrealized_pl']:.2f} ({p['unrealized_pl_pct']:+.1f}%)  "
-        f"SL ${p.get('stop_loss','—')}  TP ${p.get('take_profit','—')}"
-        for p in positions
-    ) or ">None"
+    overnight_lines = []
+    for p in positions:
+        tk      = p["ticker"]
+        pl      = p["unrealized_pl"]
+        pl_pct  = p["unrealized_pl_pct"]
+        sl      = p.get("stop_loss", "—")
+        tp      = p.get("take_profit", "—")
+        half    = " ✂️½" if tk in partial_exit_tickers else ""
+        sl_str  = f"${sl:.2f}" if isinstance(sl, float) else f"${sl}" if sl != "—" else "—"
+        tp_str  = f"${tp:.2f}" if isinstance(tp, float) else f"${tp}" if tp != "—" else "—"
+        overnight_lines.append(
+            f">📌 *{tk}*{half}  {'+' if pl >= 0 else ''}{pl:.2f} ({pl_pct:+.1f}%)  "
+            f"SL {sl_str}  TP {tp_str}"
+        )
+    overnight = "\n".join(overnight_lines) or ">None"
 
     msg = (
         f"📊 *End of Day Report — {today_dt.strftime('%b %d, %Y')}*\n\n"
