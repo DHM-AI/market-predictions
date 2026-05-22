@@ -620,17 +620,21 @@ def live_alpaca():
     _rl_sign        = "+" if _realized_today >= 0 else ""
     _ul_sign        = "+" if _unrealized_pl  >= 0 else ""
 
+    _tot_sign  = "+" if _total_today >= 0 else ""
+
     st.markdown(
-        f'<div class="metrics-row" style="grid-template-columns:repeat(6,1fr);">'
+        f'<div class="metrics-row" style="grid-template-columns:repeat(7,1fr);">'
         + mc("Portfolio Value",
              f"${portfolio:,.0f}", "Total equity",
              GLOW, "Total Alpaca account value — cash + open positions.")
+        + mc("Total P&L Today",
+             f"{_tot_sign}${abs(_total_today):,.2f}", "Closed + open combined",
+             _total_color,
+             "Today's total P&L: closed trades + floating unrealized.")
         + mc("Closed Today",
-             f"{_rl_sign}${abs(_realized_today):,.2f}",
-             f"Locked in since yesterday's close",
+             f"{_rl_sign}${abs(_realized_today):,.2f}", "Locked in",
              _rl_color,
-             "Realized P&L from trades closed today only. "
-             "Resets every morning at yesterday's closing equity.")
+             "Realized P&L from trades closed today only. Resets each morning.")
         + mc("Open Now",
              f"{_ul_sign}${abs(_unrealized_pl):,.2f}",
              f"{len(positions)} position{'s' if len(positions) != 1 else ''} live",
