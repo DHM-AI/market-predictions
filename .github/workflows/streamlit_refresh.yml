@@ -1,0 +1,47 @@
+name: Streamlit Auto-Refresh
+
+# Triggers a fresh Streamlit Community Cloud deployment automatically
+# by pushing a timestamp commit after every code push or on a daily
+# schedule. Streamlit's GitHub webhook fires on every push to main —
+# this guarantees it never misses a code change.
+#
+# The [skip ci] tag on the stamp commit prevents this from looping
+# back into GitHub Actions. Streamlit's webhook does NOT respect
+# [skip ci], so it still redeploys — exactly what we want.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.streamlit/deploy_stamp.txt'  # don't loop on stamp commits
+
+  schedule:
+    - cron: '0 11 * * 1-5'   # Mon–Fri 7 AM ET — fresh before market open
+    - cron: '0 2  * * 2-6'   # Mon–Fri 10 PM ET — fresh after ORACLE runs
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write deployment timestamp
+        run: |
+          mkdir -p .streamlit
+          echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" > .streamlit/deploy_stamp.txt
+
+      - name: Commit and push stamp
+        run: |
+          git config user.email "illuminati-bot@github.com"
+          git config user.name  "Illuminati Bot"
+          git add .streamlit/deploy_stamp.txt
+          # Only commit if the file actually changed
+          git diff --staged --quiet && echo "No change — skipping" && exit 0
+          git commit -m "chore: refresh Streamlit [skip ci]"
+          git push
