@@ -72,7 +72,8 @@ def _backfill_actual_moves(ohlcv_map: dict) -> None:
 
 
 def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
-                    regime: dict | None = None) -> list[dict]:
+                    regime: dict | None = None,
+                    min_score: int | None = None) -> list[dict]:
     """Auto-execute High-confidence picks via Alpaca (paper by default)."""
     from execution.alpaca import is_configured, place_order, is_live_mode, get_positions, get_account
     if not is_configured():
@@ -95,6 +96,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         open_positions  = []
         portfolio_value = BANKROLL
 
+    _effective_min_score = min_score if min_score is not None else AUTO_EXECUTE_MIN_SCORE
     results    = []
     auto_picks = picks_df[picks_df["score"] >= _effective_min_score]
     for _, row in auto_picks.iterrows():
@@ -278,7 +280,8 @@ def run_scan(send_email: bool = True,
 
     # Alpaca execution
     if execute_trades:
-        trade_results = _execute_trades(picks_df, explanations, regime=regime)
+        trade_results = _execute_trades(picks_df, explanations, regime=regime,
+                                        min_score=_effective_min_score)
     else:
         print("      [APEX] Alpaca execution skipped (--no-trade)")
         trade_results = []
