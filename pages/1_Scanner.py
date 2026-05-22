@@ -699,6 +699,9 @@ def live_alpaca():
                 pass
             return names
 
+        # Sort: biggest winners first, biggest losers last
+        positions = sorted(positions, key=lambda p: p.get("unrealized_pl", 0), reverse=True)
+
         _pos_tickers = tuple(p["ticker"] for p in positions)
         _pos_names   = _pos_company_names(_pos_tickers)
 
@@ -1096,8 +1099,9 @@ def live_goal_bar():
     pace_color = GREEN if pace_diff >= 0 else AMBER if pace_diff > -target_dollars * 0.05 else RED
     pace_lbl   = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
 
-    rl_sign = "+" if realized_pl   >= 0 else ""
-    ul_sign = "+" if unrealized_pl >= 0 else ""
+    rl_sign  = "+" if realized_pl   >= 0 else "-"
+    ul_sign  = "+" if unrealized_pl >= 0 else "-"
+    sep_sign = "+" if unrealized_pl >= 0 else "−"  # separator changes when unrealized is negative
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
     st.markdown(f"""
@@ -1114,16 +1118,16 @@ def live_goal_bar():
         <div>
           <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
                color:{GREEN};margin-bottom:3px;">🔒 Realized (Closed)</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GREEN};">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GREEN if realized_pl >= 0 else RED};">
             {rl_sign}${abs(realized_pl):,.0f}
           </div>
         </div>
-        <div style="color:{TEXT3};font-size:20px;">+</div>
+        <div style="color:{TEXT3};font-size:20px;">{sep_sign}</div>
         <div>
           <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
-               color:{GLOW};margin-bottom:3px;">📈 Unrealized (Open)</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GLOW};">
-            {ul_sign}${abs(unrealized_pl):,.0f}
+               color:{GLOW if unrealized_pl >= 0 else RED};margin-bottom:3px;">📈 Unrealized (Open)</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GLOW if unrealized_pl >= 0 else RED};">
+            ${abs(unrealized_pl):,.0f}
           </div>
         </div>
         <div style="color:{TEXT3};font-size:20px;">=</div>
@@ -1132,7 +1136,7 @@ def live_goal_bar():
                color:{TEXT2};margin-bottom:3px;">Total</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;
                color:{'#00ff88' if total_pl_goal > 0 else '#ff2d78' if total_pl_goal < 0 else TEXT2};">
-            {"+" if total_pl_goal >= 0 else ""}${abs(total_pl_goal):,.0f}
+            {"+" if total_pl_goal >= 0 else "-"}${abs(total_pl_goal):,.0f}
           </div>
         </div>
       </div>
