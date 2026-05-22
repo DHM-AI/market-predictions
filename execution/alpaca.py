@@ -642,10 +642,17 @@ def trail_positions(
 
     Returns a list of dicts for positions that were upgraded to trailing.
     """
-    from config import TRAIL_TRIGGER_PCT, TRAIL_PCT
+    from config import TRAIL_TRIGGER_PCT, TRAIL_PCT, TRAIL_TIGHTEN_LEVELS
 
     trigger = trigger_pct if trigger_pct is not None else TRAIL_TRIGGER_PCT
     trail   = trail_pct   if trail_pct   is not None else TRAIL_PCT
+
+    def _target_trail(pct_gain_decimal: float) -> float:
+        """Return the tightest applicable trail % for this gain level."""
+        for min_gain, t_pct in TRAIL_TIGHTEN_LEVELS:
+            if pct_gain_decimal >= min_gain:
+                return t_pct
+        return trail
 
     if not is_configured():
         return []
@@ -686,14 +693,33 @@ def trail_positions(
 
             ticker_orders = orders_by_ticker.get(ticker, [])
 
-            # Skip if a trailing stop already exists for this ticker
-            already_trailing = any(
-                "trailing" in str(getattr(o, "type", "")).lower()
-                for o in ticker_orders
+            # Determine target trail % for this gain level
+            pct_gain_decimal = pct_gain / 100.0
+            target_trail = _target_trail(pct_gain_decimal)
+
+            # Check for existing trailing stop
+            existing_trail = next(
+                (o for o in ticker_orders
+                 if "trailing" in str(getattr(o, "type", "")).lower()),
+                None
             )
-            if already_trailing:
-                print(f"[AEGIS] {ticker} already has a trailing stop — skipping")
-                continue
+            if existing_trail:
+                # Already trailing — check if we need to tighten
+                existing_pct = float(getattr(existing_trail, "trail_percent", 0) or 0)
+                if existing_pct == 0 or target_trail >= existing_pct / 100:
+                    # No tightening needed
+                    print(f"[AEGIS] {ticker} trailing at {existing_pct:.1f}% — no tighten needed")
+                    continue
+                # Tighten: cancel old trailing stop, place tighter one
+                try:
+                    client.cancel_order_by_id(str(existing_trail.id))
+                    print(f"[AEGIS] {ticker} tightening trail: {existing_pct:.1f}% → {target_trail*100:.1f}%")
+                except Exception:
+                    continue  # if cancel fails, skip to avoid duplicates
+            else:
+                # No trailing stop — only activate if gain >= trigger
+                if pct_gain < trigger * 100:
+                    continue
 
             # Process each position in its own try/except so one failure
             # (e.g. fractional share DAY-only restriction) doesn't kill the loop
@@ -710,7 +736,7 @@ def trail_positions(
                             print(f"[AEGIS] Could not cancel SL for {ticker}: {ce}")
 
                 # Place native Alpaca trailing stop — try GTC first, DAY fallback for fractionals
-                trail_pct_val = trail * 100   # Alpaca wants e.g. 3.0 for 3%
+                trail_pct_val = target_trail * 100   # Alpaca wants e.g. 3.0 for 3%
                 assert 0.5 <= trail_pct_val <= 20, f"trail_percent {trail_pct_val} out of sane range"
                 order = None
                 for tif in [TimeInForce.GTC, TimeInForce.DAY]:

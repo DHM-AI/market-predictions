@@ -88,7 +88,7 @@ MONTHLY_TARGET_PCT  = 0.10   # 10% per month target return
 # ── Prediction ────────────────────────────────────────────────────────────────
 MIN_SCORE_TO_ALERT  = 50
 TOP_N_CLAUDE_ANALYSIS = 5
-MOVE_TARGET_PCT     = 0.07   # 7% move target (raised from 5% to support 10%/mo goal)
+MOVE_TARGET_PCT     = 0.20   # 20% ceiling TP — trailing stops handle normal exits at 3-7%
 
 # ── Model blending weights ────────────────────────────────────────────────────
 XGB_WEIGHT       = 0.70
@@ -96,7 +96,7 @@ SENTIMENT_WEIGHT = 0.30
 
 # ── Kelly Criterion / position sizing ─────────────────────────────────────────
 BANKROLL          = float(os.getenv("BANKROLL", "50000"))
-KELLY_WIN_PCT     = 0.07   # expected gain on a win (7% move target — aligned with 10%/mo goal)
+KELLY_WIN_PCT     = 0.10   # expected gain on a win (trailing stops avg ~10% on winners)
 KELLY_LOSS_PCT    = 0.03   # expected loss if wrong (3% stop)
 KELLY_FRACTION    = 0.5    # use half-Kelly for safety
 MAX_POSITION_PCT  = 0.15   # max 15% of bankroll per trade (raised to support 10%/mo goal)
@@ -111,10 +111,26 @@ GUARD_CLOSE_THRESHOLD   = -0.60  # LONG:  close position when sentiment this bad
 # (reversed for SHORT positions)
 
 # ── Trailing stop ──────────────────────────────────────────────────────────────
-# When a position gains TRAIL_TRIGGER_PCT, cancel the fixed SL and replace
-# with an Alpaca native trailing stop that follows price up automatically.
+# Multi-level trailing: as gains grow, the trail tightens to lock in more profit.
+# AEGIS checks all levels on every run — positions always upgrade to the tightest
+# applicable level.
 TRAIL_TRIGGER_PCT = 0.03   # activate trailing when position is up 3%
-TRAIL_PCT         = 0.03   # trail 3% below the highest price since activation
+TRAIL_PCT         = 0.03   # initial trail — 3% below peak
+
+# Tightening levels: (min_gain_pct, trail_pct)
+# At +7% gain → tighten to 2% trail (locks in ~5%)
+# At +10% gain → tighten to 1.5% trail (locks in ~8.5%)
+# At +15% gain → tighten to 1% trail (locks in ~14%)
+TRAIL_TIGHTEN_LEVELS = [
+    (0.15, 0.010),   # up 15%+ → 1.0% trail
+    (0.10, 0.015),   # up 10%+ → 1.5% trail
+    (0.07, 0.020),   # up  7%+ → 2.0% trail
+    (0.03, 0.030),   # up  3%+ → 3.0% trail (initial)
+]
+
+# Cooldown: after a big winner closes, block opposite-direction signals
+COOLDOWN_WIN_THRESHOLD = 0.05   # block counter-signal if prior close was +5%+
+COOLDOWN_HOURS         = 24     # hours to block counter-direction trades
 
 # ── Auto-execution threshold ──────────────────────────────────────────────────
 # Only auto-execute if score >= this AND Alpaca is configured

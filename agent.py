@@ -152,6 +152,49 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
 
         reason = explanations.get(ticker, "")[:120]
 
+        # ── Cooldown rule: block counter-direction after big winner ──────────
+        # If a ticker closed with +5%+ gain recently, block the opposite direction
+        # for COOLDOWN_HOURS to prevent the system fighting itself (e.g. long DELL
+        # made +15% then immediately shorting DELL)
+        try:
+            from config import COOLDOWN_WIN_THRESHOLD, COOLDOWN_HOURS
+            from execution.alpaca import get_closed_trade_pnl
+            from datetime import datetime as _dt, timedelta as _td
+            _recent = get_closed_trade_pnl(days=2)
+            _cutoff = _dt.now() - _td(hours=COOLDOWN_HOURS)
+            for _ct in _recent:
+                if _ct["ticker"] != ticker:
+                    continue
+                try:
+                    _closed_at = _dt.strptime(_ct["closed_at"][:16], "%Y-%m-%d %H:%M")
+                except Exception:
+                    continue
+                if _closed_at < _cutoff:
+                    continue
+                _prior_pct = _ct["realized_pnl_pct"] / 100.0
+                if abs(_prior_pct) < COOLDOWN_WIN_THRESHOLD:
+                    continue
+                # Determine prior direction
+                _prior_long = _ct["realized_pnl"] > 0  # simplified: profit = was long going up
+                _cur_bearish = direction == "bearish"
+                if _prior_long and _cur_bearish and _prior_pct > 0:
+                    print(f"  {ticker}: COOLDOWN — closed long +{_prior_pct:.1%} "
+                          f"{int(((_dt.now()-_closed_at).total_seconds()/3600))}h ago, "
+                          f"blocking bearish signal for {COOLDOWN_HOURS}h")
+                    dollar = 0  # skip this trade
+                    break
+                if not _prior_long and not _cur_bearish and _prior_pct > 0:
+                    print(f"  {ticker}: COOLDOWN — closed short +{_prior_pct:.1%} "
+                          f"{int(((_dt.now()-_closed_at).total_seconds()/3600))}h ago, "
+                          f"blocking bullish signal for {COOLDOWN_HOURS}h")
+                    dollar = 0
+                    break
+        except Exception:
+            pass
+
+        if dollar <= 0:
+            continue
+
         # ── Route: crypto vs equity ───────────────────────────────────────
         if is_crypto(ticker) and ENABLE_CRYPTO:
             alpaca_sym = CRYPTO_YFINANCE_TO_ALPACA.get(ticker, ticker)
