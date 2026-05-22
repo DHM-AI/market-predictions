@@ -5,7 +5,7 @@ No server, no credentials setup, no spam filters. Just a webhook URL.
 
 Setup (one-time, ~5 minutes):
   1. https://api.slack.com/apps → "Create New App" → "From scratch"
-  2. Give it a name (e.g. "Market Intelligence") → pick your workspace
+  2. Give it a name (e.g. "Illuminati") → pick your workspace
   3. Left sidebar → "Incoming Webhooks" → toggle On
   4. "Add New Webhook to Workspace" → pick a channel (e.g. #trading or #alerts)
   5. Copy the Webhook URL (starts with https://hooks.slack.com/services/...)
@@ -188,7 +188,7 @@ def send_health_report(report) -> bool:
                 "title":    header,
                 "text":     f"_{summary}_\n\n{checks_text}",
                 "mrkdwn_in": ["pretext", "text"],
-                "footer":   "Illuminati · Health Check Agent",
+                "footer":   "Illuminati · PULSE",
                 "ts":       int(datetime.now().timestamp()),
             }
         ]
@@ -280,9 +280,14 @@ def send_test_message() -> bool:
     return _post({
         "text": (
             "🤖 *Illuminati — Slack webhook connected!*\n"
+            "Agents online:\n"
+            "• ARGUS (scan) · CIPHER (research) · PYTHIA (predict)\n"
+            "• THEMIS (risk) · APEX (execution) · VIGIL (sentiment guard)\n"
+            "• AEGIS (trail stops) · DUSK (intraday close) · ORACLE (learning)\n"
+            "• CHRONICLE (EOD report) · PULSE (health check) · GENESIS (monthly retrain)\n\n"
             "You'll receive:\n"
             "• 📊 Trade picks after each of the 7 daily scans\n"
-            "• 🩺 Health check reports (weekdays 5PM + Sunday 11AM ET)\n"
-            "• 🔔 Instant alerts when a bracket order is placed"
+            "• 🩺 PULSE health check reports (weekdays 5PM + Sunday 11AM ET)\n"
+            "• 🔔 Instant alerts when APEX places a bracket order"
         )
     })

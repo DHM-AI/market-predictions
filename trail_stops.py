@@ -19,11 +19,11 @@ if not is_configured():
     print("Alpaca not configured — skipping trail check.")
     sys.exit(0)
 
-print("Checking positions for trailing stop upgrades...")
+print("[AEGIS] Checking positions for trailing stop upgrades...")
 results = trail_positions()
 
 if not results:
-    print("No positions ready for trailing yet.")
+    print("[AEGIS] No positions ready for trailing yet.")
 else:
     print(f"\n{len(results)} position(s) upgraded to trailing stop:")
     for r in results:
@@ -31,4 +31,4 @@ else:
               f"trailing {r['trail_pct']*100:.0f}% below peak  "
               f"[{r['order_id'][:8]}...]")
 
-print("\nDone.")
+print("\n[AEGIS] Done.")

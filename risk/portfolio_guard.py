@@ -92,7 +92,7 @@ def check_trade(
                                and str(getattr(o, "status", "")) in
                                ("filled", "partially_filled", "new", "accepted", "pending_new"))
     except Exception as e:
-        print(f"[guard] Could not fetch daily trade count from Alpaca ({e}) — using in-memory fallback")
+        print(f"[THEMIS] Could not fetch daily trade count from Alpaca ({e}) — using in-memory fallback")
         trades_today = _daily_trade_count  # fall back to in-memory counter
 
     if trades_today >= MAX_DAILY_TRADES:

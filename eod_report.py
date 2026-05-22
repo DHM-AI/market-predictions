@@ -15,7 +15,7 @@ from config import BANKROLL, MONTHLY_TARGET_PCT
 
 def run():
     if not is_configured():
-        print("[eod] Alpaca not configured.")
+        print("[CHRONICLE] Alpaca not configured.")
         return
 
     acct      = get_account()
@@ -88,11 +88,11 @@ def run():
     try:
         from alerts.slack import _post
         ok = _post({"text": msg})
-        print(f"[eod] Report sent — {len(wins)} wins, {len(losses)} losses, "
+        print(f"[CHRONICLE] Report sent — {len(wins)} wins, {len(losses)} losses, "
               f"net {total_today:+.2f}")
         return ok
     except Exception as e:
-        print(f"[eod] Slack error: {e}")
+        print(f"[CHRONICLE] Slack error: {e}")
 
 
 if __name__ == "__main__":

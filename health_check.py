@@ -331,7 +331,7 @@ overall_icon = {
 }[overall]
 
 print(f"\n{'═'*60}")
-print(f"  Health Check — {datetime.now().strftime('%Y-%m-%d %H:%M ET')}")
+print(f"  Illuminati — PULSE  |  {datetime.now().strftime('%Y-%m-%d %H:%M ET')}")
 print(f"  {overall_icon}")
 print(f"  {report.summary()}")
 print(f"{'═'*60}")

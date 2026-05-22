@@ -60,15 +60,15 @@ def _slack(text: str) -> None:
 
 def run_guard() -> list[dict]:
     if not is_configured():
-        print("[guard] Alpaca not configured — skipping.")
+        print("[VIGIL] Alpaca not configured — skipping.")
         return []
 
     positions = get_positions()
     if not positions:
-        print("[guard] No open positions.")
+        print("[VIGIL] No open positions.")
         return []
 
-    print(f"[guard] Checking sentiment for {len(positions)} position(s)...")
+    print(f"[VIGIL] Checking sentiment for {len(positions)} position(s)...")
     actions = []
 
     for p in positions:
@@ -144,7 +144,7 @@ def run_guard() -> list[dict]:
 
 
 if __name__ == "__main__":
-    print(f"Sentiment Guard — {datetime.now().strftime('%Y-%m-%d %H:%M ET')}")
+    print(f"[VIGIL] Sentiment Guard — {datetime.now().strftime('%Y-%m-%d %H:%M ET')}")
     print("=" * 50)
     results = run_guard()
     print("=" * 50)

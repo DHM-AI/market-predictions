@@ -1,13 +1,12 @@
 """
-Market Predictions Agent — full 5-agent pipeline.
+Illuminati — full agent pipeline.
 
-  1. Scan Agent    — fetch universe OHLCV + filter
-  2. Research Agent — parallel Reddit + RSS + news sentiment
-  3. Prediction Agent — XGBoost + sentiment → scored picks
-  4. Risk Agent    — Kelly Criterion position sizing
-  5. Learning Agent — backfill actuals, weekly post-mortem
-
-Optional: Alpaca execution for High-confidence picks (paper mode by default).
+  ARGUS   — fetch universe OHLCV + filter
+  CIPHER  — parallel Reddit + RSS + news sentiment
+  PYTHIA  — XGBoost + sentiment → scored picks
+  THEMIS  — Kelly Criterion position sizing
+  APEX    — Alpaca execution (paper mode by default)
+  ORACLE  — backfill actuals, weekly post-mortem
 
 Run:
     python agent.py              # full scan + email + Alpaca (if configured)
@@ -69,7 +68,7 @@ def _backfill_actual_moves(ohlcv_map: dict) -> None:
         except Exception:
             continue
     if changed:
-        print(f"[agent] Backfilled {changed} actual moves.")
+        print(f"[ARGUS] Backfilled {changed} actual moves.")
 
 
 def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
@@ -77,15 +76,15 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
     """Auto-execute High-confidence picks via Alpaca (paper by default)."""
     from execution.alpaca import is_configured, place_order, is_live_mode, get_positions, get_account
     if not is_configured():
-        print("[agent] Alpaca not configured — skipping execution.")
+        print("[APEX] Alpaca not configured — skipping execution.")
         return []
 
     mode = "LIVE 🔴" if is_live_mode() else "PAPER 📄"
-    print(f"\n[agent] Alpaca execution ({mode})")
+    print(f"\n[APEX] Alpaca execution ({mode})")
 
     # Regime gate: if market is in bear regime, skip bullish auto-exec
     if regime and not regime.get("auto_exec_ok", True):
-        print(f"[agent] ⚠ Regime gate: {regime.get('warning')} — skipping bullish auto-exec")
+        print(f"[APEX] ⚠ Regime gate: {regime.get('warning')} — skipping bullish auto-exec")
 
     # Fetch current positions + account for portfolio guard
     try:
@@ -144,7 +143,8 @@ def run_scan(send_email: bool = True,
     today = datetime.today().strftime("%Y-%m-%d")
 
     print(f"\n{'='*62}")
-    print(f"  Market Predictions Agent  |  {today}")
+    print(f"  Illuminati  |  {today}")
+    print(f"  ARGUS · CIPHER · PYTHIA · THEMIS · APEX · ORACLE")
     print(f"  Model:   {'XGBoost ✓' if model_available() else 'Rule-based (no model)'}")
     print(f"  DB:      {'Supabase ✓' if db.db_available() else 'local only'}")
     print(f"  Bankroll: ${BANKROLL:,.0f}")
@@ -171,7 +171,7 @@ def run_scan(send_email: bool = True,
         print(f"[ORACLE] Adjusted auto-execute threshold: {_BASE_MIN_SCORE} → {_effective_min_score}")
 
     # ── 0. Market Regime ─────────────────────────────────────────
-    print(f"[0/5] REGIME — VIX + SPY trend + sector breadth")
+    print(f"[REGIME] VIX + SPY trend + sector breadth")
     _neutral_regime = {"regime":"neutral","vix":20.0,"vix_level":"normal",
                        "spy_vs_200ma_pct":0.0,"spy_vs_50ma_pct":0.0,"spy_trend":"sideways",
                        "sectors_above_50ma":5,"breadth":"normal","bull_multiplier":1.0,
@@ -191,13 +191,13 @@ def run_scan(send_email: bool = True,
     # ── 1. Scan ───────────────────────────────────────────────────
     from config import FUTURES
     tickers = [t for t in get_universe() if t not in FUTURES]  # exclude futures — not tradeable via Alpaca equities
-    print(f"\n[1/5] SCAN — {len(tickers)} tickers")
+    print(f"\n[ARGUS] SCAN — {len(tickers)} tickers")
     ohlcv_map = get_ohlcv_batch(tickers, period="1y", chunk_size=50)
     print(f"      Got data for {len(ohlcv_map)} tickers")
     _backfill_actual_moves(ohlcv_map)
 
     # ── 2. Research (parallel) ────────────────────────────────────
-    print(f"\n[2/5] RESEARCH — parallel Reddit + RSS + news")
+    print(f"\n[CIPHER] RESEARCH — parallel Reddit + RSS + news")
     blended_sentiment = research_universe(tickers)
 
     # Persist sentiment velocity via existing cache
@@ -216,7 +216,7 @@ def run_scan(send_email: bool = True,
         }
 
     # ── 3. Predict ────────────────────────────────────────────────
-    print(f"\n[3/5] PREDICT — XGBoost + blended sentiment")
+    print(f"\n[PYTHIA] PREDICT — XGBoost + blended sentiment")
     earnings_map: dict = {}
     for ticker in tickers:
         earnings_map[ticker] = get_earnings_days(ticker)
@@ -224,7 +224,7 @@ def run_scan(send_email: bool = True,
     picks_df = predict_universe(tickers, ohlcv_map, sentiment_map, earnings_map)
 
     if picks_df is None or picks_df.empty:
-        print("[agent] No setups above threshold today.")
+        print("[PYTHIA] No setups above threshold today.")
         return pd.DataFrame()
 
     print(f"      {len(picks_df)} setups flagged (score ≥ {MIN_SCORE_TO_ALERT})")
@@ -256,7 +256,7 @@ def run_scan(send_email: bool = True,
                 print(f"      ⚠ Options enrichment failed ({e}) — continuing without it")
 
     # ── 4. Risk — Kelly Criterion ─────────────────────────────────
-    print(f"\n[4/5] RISK — Kelly Criterion sizing (bankroll ${BANKROLL:,.0f})")
+    print(f"\n[THEMIS] RISK — Kelly Criterion sizing (bankroll ${BANKROLL:,.0f})")
     picks_df = annotate_picks(picks_df)
     for _, row in picks_df.head(10).iterrows():
         print(f"      {row['ticker']:6s}  score={row['score']:.0f}  "
@@ -268,7 +268,7 @@ def run_scan(send_email: bool = True,
                                  oracle_directive=oracle_directives.get("scanner_directive", ""))
 
     # ── 5. Learn — persist + optionally execute ───────────────────
-    print(f"\n[5/5] LEARN — persist predictions")
+    print(f"\n[ORACLE] LEARN — persist predictions")
     if db.db_available():
         rows = picks_df.copy()
         rows["date"] = today
@@ -280,7 +280,7 @@ def run_scan(send_email: bool = True,
     if execute_trades:
         trade_results = _execute_trades(picks_df, explanations, regime=regime)
     else:
-        print("      Alpaca execution skipped (--no-trade)")
+        print("      [APEX] Alpaca execution skipped (--no-trade)")
         trade_results = []
 
 

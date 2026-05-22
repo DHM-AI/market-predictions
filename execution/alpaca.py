@@ -78,11 +78,11 @@ def _check_daily_loss_limit() -> bool:
         last_equity = float(acct.last_equity)
         daily_loss  = (equity - last_equity) / last_equity
         if daily_loss < -DAILY_LOSS_LIMIT_PCT:
-            print(f"[alpaca] ⚠ Daily loss limit breached ({daily_loss:.1%}). Halting trades.")
+            print(f"[APEX] ⚠ Daily loss limit breached ({daily_loss:.1%}). Halting trades.")
             return False
         return True
     except Exception as e:
-        print(f"[alpaca] ⚠ Could not check daily loss limit ({e}) — blocking trades for safety.")
+        print(f"[APEX] ⚠ Could not check daily loss limit ({e}) — blocking trades for safety.")
         return False  # fail closed — never trade blind
 
 
@@ -115,17 +115,17 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
         try:
             asset = _get_client().get_asset(ticker)
             if not getattr(asset, "shortable", False):
-                print(f"[alpaca] {ticker} is not shortable on Alpaca — skipping bearish order")
+                print(f"[APEX] {ticker} is not shortable on Alpaca — skipping bearish order")
                 return {"status": "skipped",
                         "reason": f"{ticker} is not shortable on Alpaca",
                         "ticker": ticker}
             if not getattr(asset, "easy_to_borrow", False):
-                print(f"[alpaca] {ticker} is hard-to-borrow — skipping bearish order")
+                print(f"[APEX] {ticker} is hard-to-borrow — skipping bearish order")
                 return {"status": "skipped",
                         "reason": f"{ticker} is hard-to-borrow",
                         "ticker": ticker}
         except Exception as e:
-            print(f"[alpaca] Could not verify shortability for {ticker}: {e} — skipping")
+            print(f"[APEX] Could not verify shortability for {ticker}: {e} — skipping")
             return {"status": "skipped",
                     "reason": f"Could not verify shortability for {ticker}",
                     "ticker": ticker}
@@ -140,12 +140,12 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
             hist = yf.download(ticker, period="1d", interval="1m", progress=False, auto_adjust=True)
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
-                print(f"[alpaca] Used yfinance price for {ticker}: ${price:.2f}")
+                print(f"[APEX] Used yfinance price for {ticker}: ${price:.2f}")
         except Exception:
             pass
 
     if price is None or price <= 0:
-        print(f"[alpaca] Could not get price for {ticker} — skipping (no unprotected order placed)")
+        print(f"[APEX] Could not get price for {ticker} — skipping (no unprotected order placed)")
         return {"status": "skipped", "reason": f"Could not fetch price for {ticker}"}
 
     qty = max(1, round(dollar_amount / price))
@@ -158,7 +158,7 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
         stop_price  = round(price * (1 + KELLY_LOSS_PCT), 2)
         limit_price = round(price * (1 - MOVE_TARGET_PCT), 2)
 
-    print(f"[alpaca] [{mode}] BRACKET {side.upper()} {qty} {ticker} @ ~${price:.2f}")
+    print(f"[APEX] [{mode}] BRACKET {side.upper()} {qty} {ticker} @ ~${price:.2f}")
     print(f"         Stop loss: ${stop_price:.2f} ({KELLY_LOSS_PCT*100:.0f}% risk)")
     print(f"         Take profit: ${limit_price:.2f} ({MOVE_TARGET_PCT*100:.0f}% target)")
 
@@ -205,7 +205,7 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
         return result
 
     except Exception as e:
-        print(f"[alpaca] Bracket order failed: {e}. Falling back to simple order.")
+        print(f"[APEX] Bracket order failed: {e}. Falling back to simple order.")
         return _place_simple_order(ticker, dollar_amount, side, mode, reason)
 
 
@@ -319,7 +319,7 @@ def get_positions() -> list[dict]:
             })
         return result
     except Exception as e:
-        print(f"[alpaca] get_positions error: {e}")
+        print(f"[APEX] get_positions error: {e}")
         return []
 
 
@@ -404,7 +404,7 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
         return sorted(results, key=lambda x: x["closed_at"], reverse=True)
 
     except Exception as e:
-        print(f"[alpaca] get_closed_trade_pnl error: {e}")
+        print(f"[APEX] get_closed_trade_pnl error: {e}")
         return []
 
 
@@ -488,7 +488,7 @@ def tighten_stop(ticker: str, stop_pct: float = 0.015) -> dict:
         )
         order = client.submit_order(stop_req)
         mode  = "LIVE" if is_live_mode() else "PAPER"
-        print(f"[guard] [{mode}] {ticker} stop tightened → ${new_stop:.2f} "
+        print(f"[VIGIL] [{mode}] {ticker} stop tightened → ${new_stop:.2f} "
               f"({stop_pct*100:.1f}% below ${price:.2f})")
         return {
             "status":    "tightened",
@@ -570,7 +570,7 @@ def trail_positions(
                 for o in ticker_orders
             )
             if already_trailing:
-                print(f"[trail] {ticker} already has a trailing stop — skipping")
+                print(f"[AEGIS] {ticker} already has a trailing stop — skipping")
                 continue
 
             # Cancel existing fixed stop-loss order(s)
@@ -582,7 +582,7 @@ def trail_positions(
                         client.cancel_order_by_id(str(o.id))
                         cancelled += 1
                     except Exception as ce:
-                        print(f"[trail] Could not cancel SL for {ticker}: {ce}")
+                        print(f"[AEGIS] Could not cancel SL for {ticker}: {ce}")
 
             # Place native Alpaca trailing stop
             trail_pct_val = trail * 100   # Alpaca wants e.g. 3.0 for 3%
@@ -597,7 +597,7 @@ def trail_positions(
             order = client.submit_order(trail_req)
 
             mode = "LIVE" if is_live_mode() else "PAPER"
-            print(f"[trail] [{mode}] {ticker} up {pct_gain:.1f}% → "
+            print(f"[AEGIS] [{mode}] {ticker} up {pct_gain:.1f}% → "
                   f"trailing stop {trail*100:.0f}% activated "
                   f"(cancelled {cancelled} fixed SL)")
 
@@ -625,7 +625,7 @@ def trail_positions(
                 pass
 
     except Exception as e:
-        print(f"[trail] trail_positions error: {e}")
+        print(f"[AEGIS] trail_positions error: {e}")
 
     return results
 

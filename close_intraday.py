@@ -27,7 +27,7 @@ def _get_todays_entries() -> set[str]:
             and str(getattr(o, "status", "")) in ("filled", "partially_filled")
         }
     except Exception as e:
-        print(f"[close_intraday] Could not fetch today's orders: {e}")
+        print(f"[DUSK] Could not fetch today's orders: {e}")
         return set()
 
 
@@ -53,20 +53,20 @@ def _get_duration_map(tickers: set[str]) -> dict[str, str]:
             return {r["ticker"]: str(r.get("duration", "")) for r in rows
                     if r.get("ticker") in tickers}
     except Exception as e:
-        print(f"[close_intraday] DB lookup failed: {e}")
+        print(f"[DUSK] DB lookup failed: {e}")
     return {}
 
 
 def run() -> list[dict]:
     if not is_configured():
-        print("[close_intraday] Alpaca not configured — skipping.")
+        print("[DUSK] Alpaca not configured — skipping.")
         return []
 
     positions      = get_positions()
     todays_entries = _get_todays_entries()
 
     if not positions:
-        print("[close_intraday] No open positions.")
+        print("[DUSK] No open positions.")
         return []
 
     opened_today  = {p["ticker"] for p in positions if p["ticker"] in todays_entries}
@@ -89,7 +89,7 @@ def run() -> list[dict]:
             # Opened today but holds 2d, 3d, 5-7d etc — respect its duration
             to_hold.append((p, f"{duration or 'no duration'}"))
 
-    print(f"[close_intraday] {len(positions)} positions:")
+    print(f"[DUSK] {len(positions)} positions:")
     print(f"  Closing  : {len(to_close)}")
     print(f"  Holding  : {len(to_hold)}")
     for p, reason in to_hold:
@@ -134,13 +134,13 @@ def run() -> list[dict]:
             pass
 
     elif opened_today:
-        print("[close_intraday] All positions opened today are swing trades — holding overnight.")
+        print("[DUSK] All positions opened today are swing trades — holding overnight.")
 
     return results
 
 
 if __name__ == "__main__":
-    print(f"Intraday Closer — {datetime.now().strftime('%Y-%m-%d %H:%M ET')}")
+    print(f"[DUSK] Intraday Closer — {datetime.now().strftime('%Y-%m-%d %H:%M ET')}")
     print("=" * 50)
     results = run()
     print("=" * 50)
