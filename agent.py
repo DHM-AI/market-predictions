@@ -99,6 +99,10 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
 
     _effective_min_score = min_score if min_score is not None else AUTO_EXECUTE_MIN_SCORE
     results    = []
+    # Track positions and trades opened THIS run so limits are enforced
+    # even before Alpaca fills propagate back through the API
+    _new_positions = 0
+    _new_trades    = 0
     auto_picks = picks_df[picks_df["score"] >= _effective_min_score]
     for _, row in auto_picks.iterrows():
         ticker    = row["ticker"]
@@ -106,6 +110,18 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         dollar    = row.get("dollar_amount", 0)
         if dollar <= 0:
             continue
+
+        # Hard stop — enforce position + trade limits using in-run counters
+        from risk.portfolio_guard import MAX_OPEN_POSITIONS, MAX_DAILY_TRADES
+        current_positions = len(open_positions) + _new_positions
+        if current_positions >= MAX_OPEN_POSITIONS:
+            print(f"  {ticker}: BLOCKED — position limit reached "
+                  f"({current_positions}/{MAX_OPEN_POSITIONS})")
+            continue
+        if _new_trades >= MAX_DAILY_TRADES:
+            print(f"  {ticker}: BLOCKED — daily trade limit reached "
+                  f"({_new_trades}/{MAX_DAILY_TRADES})")
+            break
 
         # Regime gate — skip mixed/bullish trades in bear regime
         if regime and not regime.get("auto_exec_ok", True):
@@ -120,7 +136,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
                 dollar = round(dollar * multiplier, 2)
                 print(f"  {ticker}: position reduced to ${dollar:.0f} (regime multiplier {multiplier:.0%})")
 
-        # Portfolio guard check
+        # Portfolio guard check (duplicate detection, sector limits, etc.)
         ok, guard_reason = check_trade(ticker, dollar, direction, open_positions, portfolio_value)
         if not ok:
             print(f"  {ticker}: BLOCKED by portfolio guard — {guard_reason}")
@@ -135,6 +151,8 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         send_trade_alert(result)   # instant Slack ping when bracket order placed
         if result.get("status") == "submitted":
             increment_daily_count()
+            _new_positions += 1
+            _new_trades    += 1
 
     return results
 
