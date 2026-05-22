@@ -45,7 +45,7 @@ def _fetch_feed(url: str) -> list[dict]:
         return []
 
 
-def _score_entry(entry: dict, ticker: str) -> float | None:
+def _score_entry(entry: dict, ticker: str) :
     text = (entry.get("title", "") + " " + entry.get("summary", "")).lower()
     if ticker.lower() not in text and f"${ticker.lower()}" not in text:
         return None  # not relevant to this ticker

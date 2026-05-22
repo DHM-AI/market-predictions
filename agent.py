@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Illuminati — full agent pipeline.
 

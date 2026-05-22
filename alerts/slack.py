@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Slack Webhook alert module — replaces Gmail SMTP.
 
