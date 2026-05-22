@@ -18,6 +18,8 @@ jobs:
       ALPACA_LIVE_MODE:  ${{ secrets.ALPACA_LIVE_MODE }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       BANKROLL:          ${{ secrets.BANKROLL }}
+      SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY:      ${{ secrets.SUPABASE_KEY }}
 
     steps:
       - uses: actions/checkout@v4
