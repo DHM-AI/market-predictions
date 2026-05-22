@@ -1,0 +1,564 @@
+"""
+ZEUS — Full System Audit Agent
+
+Runs every weeknight at 11 PM ET (after ORACLE at 10 PM).
+ZEUS is the guardian of the Illuminati system — it performs a deep audit
+of every safety control and operational gate, then reports to Slack.
+
+Checks:
+  1.  Open positions all have stop loss orders active in Alpaca
+  2.  Position count does not exceed MAX_OPEN_POSITIONS (15)
+  3.  Daily trade count is within MAX_DAILY_TRADES (20)
+  4.  Portfolio is above daily loss limit
+  5.  GitHub Actions ran today (via Supabase predictions timestamp)
+  6.  ORACLE ran and saved learnings today (or this week)
+  7.  No positions are >20% underwater without a stop loss
+  8.  Trailing stops are active on positions up >3%
+  9.  Buying power is not near zero
+ 10.  XGBoost model file exists and is fresh
+
+Exit code 0 = all good, 1 = at least one FAIL.
+"""
+import os
+import sys
+from datetime import datetime, timedelta
+
+# ── Colors for terminal output ────────────────────────────────────────────────
+GREEN  = "\033[92m"
+YELLOW = "\033[93m"
+RED    = "\033[91m"
+RESET  = "\033[0m"
+BOLD   = "\033[1m"
+
+PASS = f"{GREEN}✓ PASS{RESET}"
+WARN = f"{YELLOW}⚠ WARN{RESET}"
+FAIL = f"{RED}✗ FAIL{RESET}"
+
+# ── ZEUS limits (hard caps — not in config to avoid accidental edits) ─────────
+MAX_OPEN_POSITIONS   = 15
+MAX_DAILY_TRADES     = 20
+MIN_BUYING_POWER_PCT = 0.05   # WARN if buying power < 5% of portfolio
+DEEP_UNDERWATER_PCT  = 20.0   # positions down >20% trigger FAIL
+TRAIL_TRIGGER_PCT    = 3.0    # positions up >3% should have trailing stop
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AuditReport — mirrors HealthReport from health_check.py
+# ══════════════════════════════════════════════════════════════════════════════
+
+class AuditReport:
+    def __init__(self):
+        self.checks  = []   # list of (name, status, detail)
+        self.n_pass  = 0
+        self.n_warn  = 0
+        self.n_fail  = 0
+        self.started = datetime.now()
+
+    def add(self, name: str, status: str, detail: str):
+        self.checks.append((name, status, detail))
+        if   status == "PASS": self.n_pass += 1
+        elif status == "WARN": self.n_warn += 1
+        elif status == "FAIL": self.n_fail += 1
+        icon = {"PASS": PASS, "WARN": WARN, "FAIL": FAIL}.get(status, status)
+        print(f"  [ZEUS] {icon}  {name}: {detail}")
+
+    def overall(self) -> str:
+        if self.n_fail > 0:  return "FAIL"
+        if self.n_warn > 0:  return "WARN"
+        return "PASS"
+
+    def summary(self) -> str:
+        elapsed = (datetime.now() - self.started).seconds
+        return (f"{self.n_pass} passed · {self.n_warn} warnings · "
+                f"{self.n_fail} failures · {elapsed}s")
+
+
+report = AuditReport()
+today  = datetime.today().strftime("%Y-%m-%d")
+now    = datetime.now()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BOOTSTRAP — environment + connections
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[ZEUS] Starting full system audit — {now.strftime('%Y-%m-%d %H:%M ET')}{RESET}")
+
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+# Load Alpaca and Supabase once so checks can share the data
+alpaca_acct      = {}
+alpaca_positions = []
+alpaca_orders    = []
+alpaca_ok        = False
+
+try:
+    from execution.alpaca import is_configured, is_live_mode, get_account, get_positions
+    from config import ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL, ALPACA_LIVE_MODE
+
+    if is_configured():
+        alpaca_acct      = get_account()
+        alpaca_positions = get_positions()
+
+        # Fetch raw open orders for stop loss inspection
+        try:
+            from alpaca.trading.client import TradingClient
+            from alpaca.trading.requests import GetOrdersRequest
+            from alpaca.trading.enums import QueryOrderStatus
+            _client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY,
+                                    paper=not ALPACA_LIVE_MODE)
+            alpaca_orders = _client.get_orders(
+                GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        except Exception as _e:
+            print(f"  [ZEUS] Could not fetch raw orders: {_e}")
+
+        alpaca_ok = True
+except Exception as e:
+    print(f"  [ZEUS] Alpaca bootstrap failed: {e}")
+
+db_ok = False
+try:
+    import db
+    db_ok = db.db_available()
+except Exception:
+    pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 1 — All open positions have a stop loss order active
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[1/10] Stop Loss Coverage{RESET}")
+if not alpaca_ok:
+    report.add("Stop Loss Coverage", "WARN",
+               "Alpaca not configured — cannot verify stop loss orders")
+elif not alpaca_positions:
+    report.add("Stop Loss Coverage", "PASS", "No open positions — nothing to check")
+else:
+    # Build set of tickers that have at least one stop or trailing stop order
+    protected_tickers = set()
+    for o in alpaca_orders:
+        otype = str(getattr(o, "type", "")).lower()
+        if "stop" in otype or "trailing" in otype:
+            protected_tickers.add(o.symbol)
+        # Also check bracket order legs
+        for leg in (getattr(o, "legs", None) or []):
+            if getattr(leg, "stop_price", None):
+                protected_tickers.add(o.symbol)
+
+    open_tickers  = {p["ticker"] for p in alpaca_positions}
+    unprotected   = open_tickers - protected_tickers
+
+    if unprotected:
+        report.add("Stop Loss Coverage", "FAIL",
+                   f"No stop loss found for: {', '.join(sorted(unprotected))}")
+    else:
+        report.add("Stop Loss Coverage", "PASS",
+                   f"All {len(open_tickers)} position(s) have stop loss orders")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 2 — Position count ≤ MAX_OPEN_POSITIONS
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[2/10] Position Count Limit{RESET}")
+if not alpaca_ok:
+    report.add("Position Count", "WARN", "Alpaca not configured")
+else:
+    n_pos = len(alpaca_positions)
+    if n_pos > MAX_OPEN_POSITIONS:
+        report.add("Position Count", "FAIL",
+                   f"{n_pos} positions open — exceeds MAX_OPEN_POSITIONS ({MAX_OPEN_POSITIONS})")
+    elif n_pos >= MAX_OPEN_POSITIONS * 0.8:
+        report.add("Position Count", "WARN",
+                   f"{n_pos}/{MAX_OPEN_POSITIONS} positions open — approaching limit")
+    else:
+        report.add("Position Count", "PASS",
+                   f"{n_pos}/{MAX_OPEN_POSITIONS} positions open")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 3 — Daily trade count within MAX_DAILY_TRADES
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[3/10] Daily Trade Count{RESET}")
+if not alpaca_ok:
+    report.add("Daily Trade Count", "WARN", "Alpaca not configured")
+else:
+    try:
+        from alpaca.trading.client import TradingClient
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        from config import ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_LIVE_MODE
+
+        _tc = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=not ALPACA_LIVE_MODE)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        all_today   = _tc.get_orders(GetOrdersRequest(
+            status=QueryOrderStatus.ALL,
+            after=today_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        ))
+        # Count only filled parent orders (not bracket legs)
+        filled_today = [
+            o for o in all_today
+            if str(getattr(o, "status", "")).lower() in ("filled", "partially_filled")
+            and getattr(o, "order_class", None) != "leg"
+        ]
+        n_trades = len(filled_today)
+        if n_trades > MAX_DAILY_TRADES:
+            report.add("Daily Trade Count", "FAIL",
+                       f"{n_trades} trades today — exceeds MAX_DAILY_TRADES ({MAX_DAILY_TRADES})")
+        elif n_trades >= MAX_DAILY_TRADES * 0.75:
+            report.add("Daily Trade Count", "WARN",
+                       f"{n_trades}/{MAX_DAILY_TRADES} trades today — approaching limit")
+        else:
+            report.add("Daily Trade Count", "PASS",
+                       f"{n_trades}/{MAX_DAILY_TRADES} trades executed today")
+    except Exception as e:
+        report.add("Daily Trade Count", "WARN", f"Could not count trades: {str(e)[:80]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 4 — Portfolio above daily loss limit
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[4/10] Portfolio & Daily Loss Limit{RESET}")
+if not alpaca_ok:
+    report.add("Daily Loss Limit", "WARN", "Alpaca not configured")
+else:
+    try:
+        from config import DAILY_LOSS_LIMIT_PCT
+        portfolio    = alpaca_acct.get("portfolio_value", 0)
+        last_equity  = alpaca_acct.get("last_equity", portfolio)
+        daily_chg    = (portfolio - last_equity) / last_equity if last_equity else 0
+        mode_tag     = "LIVE" if is_live_mode() else "PAPER"
+
+        if daily_chg < -DAILY_LOSS_LIMIT_PCT:
+            report.add("Daily Loss Limit", "FAIL",
+                       f"[{mode_tag}] Down {abs(daily_chg):.1%} — "
+                       f"exceeds {DAILY_LOSS_LIMIT_PCT:.0%} limit. "
+                       f"Portfolio: ${portfolio:,.2f}")
+        elif daily_chg < -(DAILY_LOSS_LIMIT_PCT * 0.6):
+            report.add("Daily Loss Limit", "WARN",
+                       f"[{mode_tag}] Down {abs(daily_chg):.1%} — "
+                       f"approaching {DAILY_LOSS_LIMIT_PCT:.0%} limit. "
+                       f"Portfolio: ${portfolio:,.2f}")
+        else:
+            report.add("Daily Loss Limit", "PASS",
+                       f"[{mode_tag}] Daily P&L: {daily_chg:+.2%} · "
+                       f"Portfolio: ${portfolio:,.2f}")
+    except Exception as e:
+        report.add("Daily Loss Limit", "WARN", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 5 — GitHub Actions ran today (predictions written today)
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[5/10] GitHub Actions / Daily Scan{RESET}")
+if not db_ok:
+    report.add("Daily Scan (ARGUS)", "WARN", "Supabase not configured — cannot verify")
+else:
+    try:
+        preds_today = db.load_predictions_for_date(today)
+        n = len(preds_today)
+        is_weekday  = now.weekday() < 5
+
+        if n == 0 and is_weekday:
+            # Check if we have predictions from yesterday as a freshness fallback
+            yesterday  = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+            preds_yest = db.load_predictions_for_date(yesterday)
+            if preds_yest:
+                report.add("Daily Scan (ARGUS)", "WARN",
+                           f"No predictions for today ({today}) — scan may not have run yet. "
+                           f"Yesterday had {len(preds_yest)} predictions.")
+            else:
+                report.add("Daily Scan (ARGUS)", "FAIL",
+                           f"No predictions for today or yesterday — ARGUS may be broken")
+        elif n == 0 and not is_weekday:
+            report.add("Daily Scan (ARGUS)", "PASS",
+                       f"Weekend — no predictions expected ({today})")
+        else:
+            latest_score = max(p.get("score", 0) for p in preds_today)
+            report.add("Daily Scan (ARGUS)", "PASS",
+                       f"{n} predictions written today · top score: {latest_score:.0f}")
+    except Exception as e:
+        report.add("Daily Scan (ARGUS)", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 6 — ORACLE ran and saved learnings this week
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[6/10] ORACLE Learnings{RESET}")
+if not db_ok:
+    report.add("ORACLE Learnings", "WARN", "Supabase not configured — cannot verify")
+else:
+    try:
+        learnings = db.load_learnings()
+        if not learnings:
+            report.add("ORACLE Learnings", "WARN",
+                       "No learnings in database — ORACLE has never run or table is empty")
+        else:
+            # learnings are ordered by week_of desc
+            latest_raw  = learnings[0]
+            week_of_str = latest_raw.get("week_of", "")
+            if week_of_str:
+                try:
+                    week_dt   = datetime.strptime(week_of_str[:10], "%Y-%m-%d")
+                    days_ago  = (now - week_dt).days
+                    n_records = len(learnings)
+                    if days_ago > 9:   # ORACLE runs weekly; >9 days = missed a cycle
+                        report.add("ORACLE Learnings", "WARN",
+                                   f"Latest learning is {days_ago}d old ({week_of_str}) — "
+                                   f"ORACLE may have missed a run")
+                    else:
+                        report.add("ORACLE Learnings", "PASS",
+                                   f"Latest learning: {week_of_str} ({days_ago}d ago) · "
+                                   f"{n_records} total records")
+                except ValueError:
+                    report.add("ORACLE Learnings", "WARN",
+                               f"Could not parse week_of date: {week_of_str!r}")
+            else:
+                report.add("ORACLE Learnings", "WARN",
+                           "Latest learning has no week_of timestamp")
+    except Exception as e:
+        report.add("ORACLE Learnings", "WARN", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 7 — No positions >20% underwater without a stop loss
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[7/10] Deep Underwater Positions{RESET}")
+if not alpaca_ok:
+    report.add("Deep Underwater Check", "WARN", "Alpaca not configured")
+elif not alpaca_positions:
+    report.add("Deep Underwater Check", "PASS", "No open positions")
+else:
+    # Rebuild protected set (reuse logic from check 1)
+    protected_2 = set()
+    for o in alpaca_orders:
+        otype = str(getattr(o, "type", "")).lower()
+        if "stop" in otype or "trailing" in otype:
+            protected_2.add(o.symbol)
+        for leg in (getattr(o, "legs", None) or []):
+            if getattr(leg, "stop_price", None):
+                protected_2.add(o.symbol)
+
+    critical = []
+    flagged  = []
+    for p in alpaca_positions:
+        pct = p.get("unrealized_pl_pct", 0)   # already in %
+        ticker = p["ticker"]
+        if pct < -DEEP_UNDERWATER_PCT:
+            if ticker not in protected_2:
+                critical.append(f"{ticker} {pct:.1f}% (NO STOP)")
+            else:
+                flagged.append(f"{ticker} {pct:.1f}%")
+
+    if critical:
+        report.add("Deep Underwater Check", "FAIL",
+                   f"Positions >20% down with NO stop: {', '.join(critical)}")
+    elif flagged:
+        report.add("Deep Underwater Check", "WARN",
+                   f"Positions >20% down (stop active): {', '.join(flagged)}")
+    else:
+        worst = min((p.get("unrealized_pl_pct", 0) for p in alpaca_positions), default=0)
+        report.add("Deep Underwater Check", "PASS",
+                   f"No positions below -{DEEP_UNDERWATER_PCT:.0f}% · "
+                   f"worst: {worst:.1f}%")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 8 — Trailing stops active on positions up >3%
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[8/10] Trailing Stop Coverage{RESET}")
+if not alpaca_ok:
+    report.add("Trailing Stop Coverage", "WARN", "Alpaca not configured")
+elif not alpaca_positions:
+    report.add("Trailing Stop Coverage", "PASS", "No open positions")
+else:
+    # Find tickers that have trailing stops
+    trailing_tickers = set()
+    for o in alpaca_orders:
+        otype = str(getattr(o, "type", "")).lower()
+        if "trailing" in otype:
+            trailing_tickers.add(o.symbol)
+
+    should_trail  = [
+        p["ticker"] for p in alpaca_positions
+        if p.get("unrealized_pl_pct", 0) >= TRAIL_TRIGGER_PCT
+    ]
+    missing_trail = [t for t in should_trail if t not in trailing_tickers]
+
+    if missing_trail:
+        report.add("Trailing Stop Coverage", "WARN",
+                   f"Up >3% but no trailing stop: {', '.join(missing_trail)} "
+                   f"— AEGIS may need to run")
+    elif should_trail:
+        report.add("Trailing Stop Coverage", "PASS",
+                   f"All {len(should_trail)} profitable position(s) have trailing stops")
+    else:
+        report.add("Trailing Stop Coverage", "PASS",
+                   f"No positions up >3% yet — trailing stops not required")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 9 — Buying power is not near zero
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[9/10] Buying Power{RESET}")
+if not alpaca_ok:
+    report.add("Buying Power", "WARN", "Alpaca not configured")
+else:
+    try:
+        buying_power  = alpaca_acct.get("buying_power", 0)
+        portfolio_val = alpaca_acct.get("portfolio_value", 1) or 1
+        bp_pct        = buying_power / portfolio_val
+
+        if buying_power <= 0:
+            report.add("Buying Power", "FAIL",
+                       f"Buying power is $0 — new trades are impossible")
+        elif bp_pct < MIN_BUYING_POWER_PCT:
+            report.add("Buying Power", "WARN",
+                       f"Buying power: ${buying_power:,.2f} ({bp_pct:.1%} of portfolio) — "
+                       f"nearly fully deployed")
+        else:
+            report.add("Buying Power", "PASS",
+                       f"Buying power: ${buying_power:,.2f} ({bp_pct:.1%} of portfolio)")
+    except Exception as e:
+        report.add("Buying Power", "WARN", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 10 — XGBoost model exists and is fresh
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[10/10] XGBoost Model Freshness{RESET}")
+try:
+    from config import MODEL_PATH, FEATURE_NAMES_PATH
+
+    if not os.path.exists(MODEL_PATH):
+        report.add("XGBoost Model", "FAIL",
+                   f"Model not found at {MODEL_PATH} — run: python -m model.trainer")
+    else:
+        model_age_days = (now.timestamp() - os.path.getmtime(MODEL_PATH)) / 86400
+        age_str = f"{model_age_days:.0f}d old"
+
+        try:
+            import pickle
+            with open(MODEL_PATH, "rb") as f:
+                model = pickle.load(f)
+            model_ok = True
+        except Exception as load_err:
+            model_ok = False
+            report.add("XGBoost Model", "FAIL",
+                       f"Model file corrupt — cannot load: {load_err}")
+
+        if model_ok:
+            feat_str = ""
+            if os.path.exists(FEATURE_NAMES_PATH):
+                import json
+                with open(FEATURE_NAMES_PATH) as f:
+                    feats = json.load(f)
+                feat_str = f" · {len(feats)} features"
+
+            if model_age_days > 35:
+                report.add("XGBoost Model", "FAIL",
+                           f"Model is {age_str} — GENESIS retrain is overdue (>35 days)")
+            elif model_age_days > 28:
+                report.add("XGBoost Model", "WARN",
+                           f"Model is {age_str} — retrain within the week{feat_str}")
+            else:
+                report.add("XGBoost Model", "PASS",
+                           f"Loads OK · {age_str}{feat_str}")
+except Exception as e:
+    report.add("XGBoost Model", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SUMMARY — terminal
+# ══════════════════════════════════════════════════════════════════════════════
+overall = report.overall()
+overall_icon = {
+    "PASS": f"{GREEN}{BOLD}✓ ALL SYSTEMS CLEARED — ILLUMINATI OPERATIONAL{RESET}",
+    "WARN": f"{YELLOW}{BOLD}⚠ SYSTEM OPERATIONAL — WARNINGS REQUIRE ATTENTION{RESET}",
+    "FAIL": f"{RED}{BOLD}✗ CRITICAL FAILURE — IMMEDIATE ACTION REQUIRED{RESET}",
+}[overall]
+
+print(f"\n{'═'*65}")
+print(f"  Illuminati — ZEUS  |  {now.strftime('%Y-%m-%d %H:%M ET')}")
+print(f"  {overall_icon}")
+print(f"  {report.summary()}")
+print(f"{'═'*65}")
+for name, status, detail in report.checks:
+    icon = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}[status]
+    print(f"  {icon} {name}: {detail}")
+print(f"{'═'*65}\n")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SLACK REPORT
+# ══════════════════════════════════════════════════════════════════════════════
+def _send_zeus_report(report: AuditReport) -> bool:
+    """Send the ZEUS audit report to Slack."""
+    from config import SLACK_WEBHOOK_URL
+    if not SLACK_WEBHOOK_URL:
+        print("[ZEUS] SLACK_WEBHOOK_URL not set — skipping Slack report.")
+        return False
+
+    import json
+    import urllib.request
+    import urllib.error
+
+    overall = report.overall()
+    color   = {"PASS": "good", "WARN": "warning", "FAIL": "danger"}[overall]
+    header  = {
+        "PASS": "✅ All Systems Cleared",
+        "WARN": "⚠️ Operational — Warnings Need Attention",
+        "FAIL": "❌ Critical Failure — Action Required",
+    }[overall]
+
+    date_str = now.strftime("%a %b %d, %Y · %H:%M ET")
+    summary  = report.summary()
+
+    lines = []
+    for name, status, detail in report.checks:
+        emoji = {"PASS": "✅", "WARN": "⚠️", "FAIL": "❌"}.get(status, "•")
+        lines.append(f"{emoji} *{name}* — {detail}")
+
+    checks_text = "\n".join(lines)
+
+    payload = {
+        "attachments": [
+            {
+                "color":    color,
+                "pretext":  f"*⚡ ZEUS Full Audit — {date_str}*",
+                "title":    header,
+                "text":     f"_{summary}_\n\n{checks_text}",
+                "mrkdwn_in": ["pretext", "text"],
+                "footer":   "Illuminati — ZEUS",
+                "ts":       int(now.timestamp()),
+            }
+        ]
+    }
+
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req  = urllib.request.Request(
+            SLACK_WEBHOOK_URL,
+            data    = data,
+            headers = {"Content-Type": "application/json"},
+            method  = "POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ok = resp.status == 200
+        if ok:
+            print(f"[ZEUS] Slack report sent — {overall}")
+        return ok
+    except urllib.error.HTTPError as e:
+        print(f"[ZEUS] Slack HTTP {e.code}: {e.read().decode()[:200]}")
+        return False
+    except Exception as e:
+        print(f"[ZEUS] Slack error: {e}")
+        return False
+
+
+try:
+    _send_zeus_report(report)
+except Exception as e:
+    print(f"[ZEUS] Slack report skipped: {e}")
+
+
+# Exit with non-zero code if any failures
+sys.exit(1 if report.n_fail > 0 else 0)
