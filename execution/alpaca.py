@@ -644,56 +644,75 @@ def trail_positions(
                 print(f"[AEGIS] {ticker} already has a trailing stop — skipping")
                 continue
 
-            # Cancel existing fixed stop-loss order(s)
-            cancelled = 0
-            for o in ticker_orders:
-                otype = str(getattr(o, "type", "")).lower()
-                if "stop" in otype and "limit" not in otype:
-                    try:
-                        client.cancel_order_by_id(str(o.id))
-                        cancelled += 1
-                    except Exception as ce:
-                        print(f"[AEGIS] Could not cancel SL for {ticker}: {ce}")
-
-            # Place native Alpaca trailing stop
-            trail_pct_val = trail * 100   # Alpaca wants e.g. 3.0 for 3%
-            assert 0.5 <= trail_pct_val <= 20, f"trail_percent {trail_pct_val} out of sane range — check config"
-            trail_req = TrailingStopOrderRequest(
-                symbol        = ticker,
-                qty           = qty,
-                side          = OrderSide.SELL,
-                time_in_force = TimeInForce.GTC,
-                trail_percent = trail_pct_val,
-            )
-            order = client.submit_order(trail_req)
-
-            mode = "LIVE" if is_live_mode() else "PAPER"
-            print(f"[AEGIS] [{mode}] {ticker} up {pct_gain:.1f}% → "
-                  f"trailing stop {trail*100:.0f}% activated "
-                  f"(cancelled {cancelled} fixed SL)")
-
-            result = {
-                "ticker":       ticker,
-                "pct_gain":     round(pct_gain, 2),
-                "trail_pct":    trail,
-                "order_id":     str(order.id),
-                "cancelled_sl": cancelled,
-                "status":       "trailing",
-                "timestamp":    datetime.now().isoformat(),
-            }
-            results.append(result)
-
-            # Instant Slack ping
+            # Process each position in its own try/except so one failure
+            # (e.g. fractional share DAY-only restriction) doesn't kill the loop
             try:
-                from alerts.slack import _post
-                _post({"text": (
-                    f"🔒 *Trailing stop activated — {ticker}*\n"
-                    f">Up *{pct_gain:.1f}%* · fixed SL replaced with "
-                    f"*{trail*100:.0f}% trailing stop* below peak\n"
-                    f">Take-profit target unchanged"
-                )})
-            except Exception:
-                pass
+                # Cancel existing fixed stop-loss order(s)
+                cancelled = 0
+                for o in ticker_orders:
+                    otype = str(getattr(o, "type", "")).lower()
+                    if "stop" in otype and "limit" not in otype:
+                        try:
+                            client.cancel_order_by_id(str(o.id))
+                            cancelled += 1
+                        except Exception as ce:
+                            print(f"[AEGIS] Could not cancel SL for {ticker}: {ce}")
+
+                # Place native Alpaca trailing stop — try GTC first, DAY fallback for fractionals
+                trail_pct_val = trail * 100   # Alpaca wants e.g. 3.0 for 3%
+                assert 0.5 <= trail_pct_val <= 20, f"trail_percent {trail_pct_val} out of sane range"
+                order = None
+                for tif in [TimeInForce.GTC, TimeInForce.DAY]:
+                    try:
+                        trail_req = TrailingStopOrderRequest(
+                            symbol        = ticker,
+                            qty           = qty,
+                            side          = OrderSide.SELL,
+                            time_in_force = tif,
+                            trail_percent = trail_pct_val,
+                        )
+                        order = client.submit_order(trail_req)
+                        break  # success
+                    except Exception as oe:
+                        if "fractional" in str(oe).lower() and tif == TimeInForce.GTC:
+                            print(f"[AEGIS] {ticker} is fractional — retrying with DAY order")
+                            continue
+                        raise  # re-raise unexpected errors
+
+                if order is None:
+                    print(f"[AEGIS] {ticker}: could not place trailing stop — skipping")
+                    continue
+
+                mode = "LIVE" if is_live_mode() else "PAPER"
+                print(f"[AEGIS] [{mode}] {ticker} up {pct_gain:.1f}% → "
+                      f"trailing stop {trail*100:.0f}% activated "
+                      f"(cancelled {cancelled} fixed SL)")
+
+                result = {
+                    "ticker":       ticker,
+                    "pct_gain":     round(pct_gain, 2),
+                    "trail_pct":    trail,
+                    "order_id":     str(order.id),
+                    "cancelled_sl": cancelled,
+                    "status":       "trailing",
+                    "timestamp":    datetime.now().isoformat(),
+                }
+                results.append(result)
+
+                # Instant Slack ping
+                try:
+                    from alerts.slack import _post
+                    _post({"text": (
+                        f"🔒 *Trailing stop activated — {ticker}*\n"
+                        f">Up *{pct_gain:.1f}%* · fixed SL replaced with "
+                        f"*{trail*100:.0f}% trailing stop* below peak\n"
+                        f">Take-profit target unchanged"
+                    )})
+                except Exception:
+                    pass
+
+            except Exception as e:
+                print(f"[AEGIS] {ticker} error: {e} — skipping")
 
     except Exception as e:
         print(f"[AEGIS] trail_positions error: {e}")
