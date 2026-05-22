@@ -374,12 +374,12 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
             sells = sorted([o for o in orders if "sell" in str(o.side).lower()],
                            key=lambda o: o.filled_at)
 
+            # ── LONG exits: sell closes a prior buy ─────────────────────────
             for sell in sells:
-                # Match to most recent buy filled before this sell
                 prior_buys = [b for b in buys if b.filled_at < sell.filled_at]
                 if not prior_buys:
                     continue
-                buy = prior_buys[-1]  # most recent buy
+                buy = prior_buys[-1]
 
                 entry_price = float(buy.filled_avg_price)
                 exit_price  = float(sell.filled_avg_price)
@@ -388,7 +388,6 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
                 realized_pnl     = round((exit_price - entry_price) * qty, 2)
                 realized_pnl_pct = round((exit_price / entry_price - 1) * 100, 2) if entry_price else 0
 
-                # Determine outcome
                 sell_type = str(getattr(sell, "type", "")).lower()
                 if "limit" in sell_type and realized_pnl > 0:
                     outcome = "tp_hit"
@@ -408,7 +407,57 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
                     "closed_at":        str(sell.filled_at)[:16].replace("T", " "),
                 })
 
-        return sorted(results, key=lambda x: x["closed_at"], reverse=True)
+            # ── SHORT exits: buy-to-cover closes a prior sell ────────────────
+            for buy in buys:
+                prior_sells = [s for s in sells if s.filled_at < buy.filled_at]
+                if not prior_sells:
+                    continue
+                # Check this buy isn't already used as a long entry
+                # (if there's a prior buy before this sell, it's a long entry not a short)
+                entry_sell = prior_sells[-1]
+                # Only treat as short exit if the sell came before this buy
+                # AND there's no prior buy (i.e., the position was opened by a sell)
+                prior_buys_before_sell = [b2 for b2 in buys if b2.filled_at < entry_sell.filled_at]
+                if prior_buys_before_sell:
+                    continue  # there was a buy before the sell → long trade, already handled
+
+                entry_price = float(entry_sell.filled_avg_price)
+                exit_price  = float(buy.filled_avg_price)
+                qty         = float(buy.filled_qty)
+
+                # Short P&L: profit when exit (cover) is below entry (short)
+                realized_pnl     = round((entry_price - exit_price) * qty, 2)
+                realized_pnl_pct = round((entry_price / exit_price - 1) * 100, 2) if exit_price else 0
+
+                buy_type = str(getattr(buy, "type", "")).lower()
+                if "limit" in buy_type and realized_pnl > 0:
+                    outcome = "tp_hit"
+                elif "stop" in buy_type and realized_pnl < 0:
+                    outcome = "sl_hit"
+                else:
+                    outcome = "manual"
+
+                results.append({
+                    "ticker":           ticker,
+                    "qty":              qty,
+                    "entry_price":      round(entry_price, 2),
+                    "exit_price":       round(exit_price, 2),
+                    "realized_pnl":     realized_pnl,
+                    "realized_pnl_pct": realized_pnl_pct,
+                    "outcome":          outcome,
+                    "closed_at":        str(buy.filled_at)[:16].replace("T", " "),
+                })
+
+        # Deduplicate (same ticker+closed_at can appear from both loops on mixed books)
+        seen = set()
+        deduped = []
+        for r in results:
+            key = (r["ticker"], r["closed_at"], r["realized_pnl"])
+            if key not in seen:
+                seen.add(key)
+                deduped.append(r)
+
+        return sorted(deduped, key=lambda x: x["closed_at"], reverse=True)
 
     except Exception as e:
         print(f"[APEX] get_closed_trade_pnl error: {e}")
