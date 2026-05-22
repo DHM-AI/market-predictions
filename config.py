@@ -132,3 +132,24 @@ SCAN_TIME_ET = "08:00"
 # ── Training ──────────────────────────────────────────────────────────────────
 TRAIN_YEARS        = 3
 TRAIN_TEST_SPLIT   = 0.80
+
+# ── Crypto ────────────────────────────────────────────────────────────────────
+# Alpaca uses "BTC/USD" format; yfinance uses "BTC-USD"
+ENABLE_CRYPTO = os.getenv("ENABLE_CRYPTO", "true").lower() == "true"
+CRYPTO_UNIVERSE = {
+    "BTC/USD":  "BTC-USD",   # Bitcoin
+    "ETH/USD":  "ETH-USD",   # Ethereum
+    "SOL/USD":  "SOL-USD",   # Solana
+    "DOGE/USD": "DOGE-USD",  # Dogecoin
+}
+# Reverse map: yfinance symbol → Alpaca symbol
+CRYPTO_YFINANCE_TO_ALPACA = {v: k for k, v in CRYPTO_UNIVERSE.items()}
+CRYPTO_YFINANCE_TICKERS   = list(CRYPTO_UNIVERSE.values())   # ["BTC-USD", ...]
+CRYPTO_ALPACA_TICKERS     = list(CRYPTO_UNIVERSE.keys())     # ["BTC/USD", ...]
+
+# ── Options ───────────────────────────────────────────────────────────────────
+# Requires Level 3 options approval on Alpaca — set ENABLE_OPTIONS=true only after
+# applying and receiving approval in the Alpaca dashboard.
+ENABLE_OPTIONS          = os.getenv("ENABLE_OPTIONS", "false").lower() == "true"
+OPTIONS_MIN_SCORE       = 85   # only use options for very high-confidence picks
+OPTIONS_EARNINGS_WINDOW = 7    # days: place iron butterfly within 7 days of earnings

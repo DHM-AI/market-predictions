@@ -836,3 +836,181 @@ def cancel_all_orders() -> int:
         return len(orders)
     except Exception:
         return 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CRYPTO EXECUTION
+# ══════════════════════════════════════════════════════════════════════════════
+
+def place_crypto_order(alpaca_symbol: str, dollar_amount: float,
+                       direction: str, reason: str = "") -> dict:
+    """
+    Place a crypto market order via Alpaca.
+
+    - alpaca_symbol: Alpaca format e.g. "BTC/USD"
+    - Crypto uses GTC (not DAY) — markets are 24/7
+    - No bracket orders for crypto — places separate stop + limit orders after fill
+    - Fractional crypto always supported (uses notional dollar amount)
+    """
+    from config import KELLY_LOSS_PCT, MOVE_TARGET_PCT
+    if not is_configured():
+        return {"status": "skipped", "reason": "Alpaca not configured"}
+
+    mode = "LIVE" if is_live_mode() else "PAPER"
+    side = "buy" if direction in ("bullish", "long") else "sell"
+
+    try:
+        from alpaca.trading.requests import MarketOrderRequest, StopOrderRequest, LimitOrderRequest
+        from alpaca.trading.enums import OrderSide, TimeInForce
+
+        client    = _get_client()
+        order_req = MarketOrderRequest(
+            symbol        = alpaca_symbol,
+            notional      = round(dollar_amount, 2),  # dollar-based for crypto
+            side          = OrderSide.BUY if side == "buy" else OrderSide.SELL,
+            time_in_force = TimeInForce.GTC,          # crypto is 24/7
+        )
+        order = client.submit_order(order_req)
+        print(f"[APEX] [{mode}] CRYPTO {side.upper()} ${dollar_amount:.0f} {alpaca_symbol}")
+
+        # After submission, estimate price to set protective orders
+        # (actual fill price may differ slightly)
+        try:
+            from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+            from alpaca.data.requests import CryptoLatestQuoteRequest
+            dc    = CryptoHistoricalDataClient(ALPACA_API_KEY, ALPACA_SECRET_KEY)
+            quote = dc.get_crypto_latest_quote(CryptoLatestQuoteRequest(symbol_or_symbols=alpaca_symbol))
+            price = float(quote[alpaca_symbol].ask_price)
+            qty   = dollar_amount / price
+
+            if side == "buy":
+                sl_price = round(price * (1 - KELLY_LOSS_PCT), 2)
+                tp_price = round(price * (1 + MOVE_TARGET_PCT), 2)
+                sl_side  = OrderSide.SELL
+                tp_side  = OrderSide.SELL
+            else:
+                sl_price = round(price * (1 + KELLY_LOSS_PCT), 2)
+                tp_price = round(price * (1 - MOVE_TARGET_PCT), 2)
+                sl_side  = OrderSide.BUY
+                tp_side  = OrderSide.BUY
+
+            # Stop loss
+            client.submit_order(StopOrderRequest(
+                symbol=alpaca_symbol, notional=round(dollar_amount, 2),
+                side=sl_side, time_in_force=TimeInForce.GTC, stop_price=sl_price))
+            # Take profit
+            client.submit_order(LimitOrderRequest(
+                symbol=alpaca_symbol, notional=round(dollar_amount, 2),
+                side=tp_side, time_in_force=TimeInForce.GTC, limit_price=tp_price))
+            print(f"         SL: ${sl_price:.2f}  TP: ${tp_price:.2f}")
+        except Exception as pe:
+            print(f"[APEX] Crypto SL/TP placement failed: {pe} — position is unprotected")
+
+        result = {
+            "status":        "submitted",
+            "order_id":      str(order.id),
+            "ticker":        alpaca_symbol,
+            "side":          side,
+            "dollar_amount": dollar_amount,
+            "asset_class":   "crypto",
+            "mode":          mode,
+            "timestamp":     datetime.now().isoformat(),
+            "reason":        reason,
+        }
+        try:
+            import db
+            if db.db_available():
+                db.save_trade(result)
+        except Exception:
+            pass
+        return result
+
+    except Exception as e:
+        print(f"[APEX] Crypto order failed for {alpaca_symbol}: {e}")
+        return {"status": "error", "reason": str(e), "ticker": alpaca_symbol}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OPTIONS EXECUTION — IRON BUTTERFLY
+# ══════════════════════════════════════════════════════════════════════════════
+
+def place_iron_butterfly(ticker: str, expiry_yymmdd: str,
+                         atm_strike: float, wing_width: float,
+                         contracts: int = 1, reason: str = "") -> dict:
+    """
+    Place a short iron butterfly (credit strategy) via Alpaca multi-leg order.
+
+    Structure:
+      - Sell 1 ATM call  (at atm_strike)
+      - Sell 1 ATM put   (at atm_strike)
+      - Buy  1 OTM call  (at atm_strike + wing_width)
+      - Buy  1 OTM put   (at atm_strike - wing_width)
+
+    Requires Level 3 options approval + ENABLE_OPTIONS=true in env.
+    """
+    from config import ENABLE_OPTIONS
+    if not ENABLE_OPTIONS:
+        return {"status": "skipped",
+                "reason": "Options trading disabled — set ENABLE_OPTIONS=true after Level 3 approval"}
+
+    if not is_configured():
+        return {"status": "skipped", "reason": "Alpaca not configured"}
+
+    mode = "LIVE" if is_live_mode() else "PAPER"
+
+    from execution.options_utils import build_option_symbol
+    sell_call = build_option_symbol(ticker, expiry_yymmdd, "C", atm_strike)
+    sell_put  = build_option_symbol(ticker, expiry_yymmdd, "P", atm_strike)
+    buy_call  = build_option_symbol(ticker, expiry_yymmdd, "C", atm_strike + wing_width)
+    buy_put   = build_option_symbol(ticker, expiry_yymmdd, "P", atm_strike - wing_width)
+
+    print(f"[APEX] [{mode}] IRON BUTTERFLY {ticker} exp={expiry_yymmdd} "
+          f"ATM={atm_strike} wings=±{wing_width}")
+    print(f"         Sell {sell_call} · Sell {sell_put}")
+    print(f"         Buy  {buy_call} · Buy  {buy_put}")
+
+    try:
+        from alpaca.trading.requests import OptionLegRequest, MarketOrderRequest
+        from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+
+        legs = [
+            OptionLegRequest(symbol=sell_call, side=OrderSide.SELL, ratio_qty=1),
+            OptionLegRequest(symbol=sell_put,  side=OrderSide.SELL, ratio_qty=1),
+            OptionLegRequest(symbol=buy_call,  side=OrderSide.BUY,  ratio_qty=1),
+            OptionLegRequest(symbol=buy_put,   side=OrderSide.BUY,  ratio_qty=1),
+        ]
+        order_req = MarketOrderRequest(
+            qty           = contracts,
+            time_in_force = TimeInForce.DAY,
+            order_class   = OrderClass.MLEG,
+            legs          = legs,
+        )
+        client = _get_client()
+        order  = client.submit_order(order_req)
+
+        result = {
+            "status":      "submitted",
+            "order_id":    str(order.id),
+            "ticker":      ticker,
+            "side":        "iron_butterfly",
+            "asset_class": "options",
+            "legs":        [sell_call, sell_put, buy_call, buy_put],
+            "atm_strike":  atm_strike,
+            "wing_width":  wing_width,
+            "expiry":      expiry_yymmdd,
+            "contracts":   contracts,
+            "mode":        mode,
+            "timestamp":   datetime.now().isoformat(),
+            "reason":      reason,
+        }
+        try:
+            import db
+            if db.db_available():
+                db.save_trade(result)
+        except Exception:
+            pass
+        return result
+
+    except Exception as e:
+        print(f"[APEX] Iron butterfly failed for {ticker}: {e}")
+        return {"status": "error", "reason": str(e), "ticker": ticker}

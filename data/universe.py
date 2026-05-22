@@ -98,8 +98,14 @@ def get_recent_ipos(months: int = 12, min_volume: int = 1_000_000) -> list[str]:
         return []
 
 
+def is_crypto(ticker: str) -> bool:
+    """True for both yfinance format (BTC-USD) and Alpaca format (BTC/USD)."""
+    from config import CRYPTO_YFINANCE_TICKERS, CRYPTO_ALPACA_TICKERS
+    return ticker in CRYPTO_YFINANCE_TICKERS or ticker in CRYPTO_ALPACA_TICKERS
+
+
 def get_universe() -> list[str]:
-    from config import WATCHLIST
+    from config import WATCHLIST, ENABLE_CRYPTO, CRYPTO_YFINANCE_TICKERS
     sp500    = get_sp500_tickers()
     ipos     = get_recent_ipos()
     seen     = set(sp500)
@@ -108,7 +114,10 @@ def get_universe() -> list[str]:
         if t not in seen:
             extras.append(t)
             seen.add(t)
-    return sp500 + extras + FUTURES
+    # Append crypto in yfinance format (BTC-USD etc.) — translated to Alpaca
+    # format only at execution time in APEX
+    crypto = CRYPTO_YFINANCE_TICKERS if ENABLE_CRYPTO else []
+    return sp500 + extras + FUTURES + crypto
 
 
 def _get_fallback_tickers() -> list[str]:

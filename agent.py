@@ -74,9 +74,15 @@ def _backfill_actual_moves(ohlcv_map: dict) -> None:
 
 def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
                     regime: dict | None = None,
-                    min_score: int | None = None) -> list[dict]:
+                    min_score: int | None = None,
+                    earnings_map: dict | None = None) -> list[dict]:
     """Auto-execute High-confidence picks via Alpaca (paper by default)."""
-    from execution.alpaca import is_configured, place_order, is_live_mode, get_positions, get_account
+    from execution.alpaca import (is_configured, place_order, is_live_mode,
+                                  get_positions, get_account,
+                                  place_crypto_order, place_iron_butterfly)
+    from data.universe import is_crypto
+    from config import (CRYPTO_YFINANCE_TO_ALPACA, ENABLE_CRYPTO,
+                        ENABLE_OPTIONS, OPTIONS_MIN_SCORE, OPTIONS_EARNINGS_WINDOW)
     if not is_configured():
         print("[APEX] Alpaca not configured — skipping execution.")
         return []
@@ -145,14 +151,54 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
             print(f"  {ticker}: {guard_reason}")
 
         reason = explanations.get(ticker, "")[:120]
-        result = place_order(ticker, dollar, direction, reason)
+
+        # ── Route: crypto vs equity ───────────────────────────────────────
+        if is_crypto(ticker) and ENABLE_CRYPTO:
+            alpaca_sym = CRYPTO_YFINANCE_TO_ALPACA.get(ticker, ticker)
+            result = place_crypto_order(alpaca_sym, dollar, direction, reason)
+        else:
+            result = place_order(ticker, dollar, direction, reason)
+
         results.append(result)
         print(f"  {ticker}: {result.get('status')} ${dollar:.0f} {direction}")
-        send_trade_alert(result)   # instant Slack ping when bracket order placed
+        send_trade_alert(result)
         if result.get("status") == "submitted":
             increment_daily_count()
             _new_positions += 1
             _new_trades    += 1
+
+    # ── Options pass: iron butterfly on high-score earnings plays ─────────
+    if ENABLE_OPTIONS and earnings_map:
+        from execution.options_utils import get_atm_strike, get_next_expiry, get_wing_increment
+        from datetime import datetime, timedelta
+        options_candidates = picks_df[
+            (picks_df["score"] >= OPTIONS_MIN_SCORE) &
+            (~picks_df["ticker"].apply(is_crypto))
+        ]
+        for _, row in options_candidates.iterrows():
+            ticker       = row["ticker"]
+            days_to_earn = earnings_map.get(ticker)
+            if days_to_earn is None or not (0 <= days_to_earn <= OPTIONS_EARNINGS_WINDOW):
+                continue
+            try:
+                from data.fetcher import get_ohlcv
+                df_c = get_ohlcv(ticker, period="5d")
+                price = float(df_c["Close"].iloc[-1]) if not df_c.empty else None
+                if not price:
+                    continue
+                earnings_dt = datetime.today() + timedelta(days=days_to_earn)
+                expiry      = get_next_expiry(earnings_dt)
+                atm         = get_atm_strike(price)
+                wing        = get_wing_increment(price)
+                reason      = explanations.get(ticker, "")[:120]
+                print(f"\n[APEX] Options play: {ticker} score={row['score']:.0f} "
+                      f"earnings in {days_to_earn}d → iron butterfly")
+                result = place_iron_butterfly(ticker, expiry, atm, wing, reason=reason)
+                results.append(result)
+                if result.get("status") == "submitted":
+                    _new_trades += 1
+            except Exception as oe:
+                print(f"[APEX] Options play failed for {ticker}: {oe}")
 
     return results
 
@@ -310,7 +356,8 @@ def run_scan(send_email: bool = True,
     # Alpaca execution
     if execute_trades:
         trade_results = _execute_trades(picks_df, explanations, regime=regime,
-                                        min_score=_effective_min_score)
+                                        min_score=_effective_min_score,
+                                        earnings_map=earnings_map)
     else:
         print("      [APEX] Alpaca execution skipped (--no-trade)")
         trade_results = []

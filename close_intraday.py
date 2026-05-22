@@ -75,9 +75,15 @@ def run() -> list[dict]:
     to_close = []
     to_hold  = []
 
+    from data.universe import is_crypto
     for p in positions:
         ticker   = p["ticker"]
         duration = duration_map.get(ticker, "")
+
+        # Crypto trades 24/7 — never close at EOD, let GTC SL/TP handle exit
+        if is_crypto(ticker):
+            to_hold.append((p, "crypto — 24/7 GTC orders"))
+            continue
 
         if ticker not in todays_entries:
             # Opened on a previous day — hold until its natural exit
