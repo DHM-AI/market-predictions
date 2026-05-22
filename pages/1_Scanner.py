@@ -1251,6 +1251,51 @@ def live_goal_bar():
 
 live_goal_bar()
 
+# ── Footer — quick links ───────────────────────────────────────────────────────
+DASHBOARD_URL = "https://ab2vk4qoxmhxtp5lze8hfl.streamlit.app"
+st.markdown(f"""
+<div style="margin-top:32px;padding:14px 20px;
+     border-top:1px solid rgba(0,180,255,0.08);
+     display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+  <div style="display:flex;gap:20px;align-items:center;">
+    <span style="font-size:10px;font-weight:700;letter-spacing:1.5px;
+                 text-transform:uppercase;color:{TEXT3};">🔺 Illuminati</span>
+    <a href="{DASHBOARD_URL}" target="_blank"
+       style="font-size:11px;color:{GLOW};text-decoration:none;
+              font-family:'JetBrains Mono',monospace;"
+       onmouseover="this.style.textDecoration='underline'"
+       onmouseout="this.style.textDecoration='none'">
+      📊 Scanner
+    </a>
+    <a href="{DASHBOARD_URL}/Track_Record" target="_blank"
+       style="font-size:11px;color:{TEXT2};text-decoration:none;"
+       onmouseover="this.style.textDecoration='underline'"
+       onmouseout="this.style.textDecoration='none'">
+      📈 Track Record
+    </a>
+    <a href="{DASHBOARD_URL}/Positions" target="_blank"
+       style="font-size:11px;color:{TEXT2};text-decoration:none;"
+       onmouseover="this.style.textDecoration='underline'"
+       onmouseout="this.style.textDecoration='none'">
+      💼 Positions
+    </a>
+    <a href="{DASHBOARD_URL}/Ticker_Dive" target="_blank"
+       style="font-size:11px;color:{TEXT2};text-decoration:none;"
+       onmouseover="this.style.textDecoration='underline'"
+       onmouseout="this.style.textDecoration='none'">
+      🔍 Ticker Dive
+    </a>
+  </div>
+  <a href="{DASHBOARD_URL}" target="_blank"
+     style="font-size:10px;color:{TEXT3};text-decoration:none;
+            font-family:'JetBrains Mono',monospace;letter-spacing:0.5px;"
+     onmouseover="this.style.color='{GLOW}'"
+     onmouseout="this.style.color='{TEXT3}'">
+    {DASHBOARD_URL.replace("https://","")}
+  </a>
+</div>
+""", unsafe_allow_html=True)
+
 # ── Smart tooltip positioning ──────────────────────────────────────────────────
 st.markdown("""
 <script>
