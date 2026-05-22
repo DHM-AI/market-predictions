@@ -458,20 +458,31 @@ def _is_market_open() -> bool:
         return False
 
 def _market_status() -> str:
-    """Descriptive market status string."""
+    """Descriptive market status string with open/close times."""
     try:
         from zoneinfo import ZoneInfo
         now = datetime.now(ZoneInfo("America/New_York"))
         if now.weekday() >= 5:
-            return "Weekend — market closed"
+            return "Weekend · Opens Mon 9:30 AM ET"
         t = now.hour * 60 + now.minute
-        if t < 4*60:              return "Closed"
-        if t < 9*60+30:           return "Pre-market open"
-        if t < 16*60:             return "🟢 Market open"
-        if t < 20*60:             return "After-hours trading"
-        return "Market closed"
+        # Minutes until open / close
+        mins_to_open  = (9 * 60 + 30) - t
+        mins_to_close = (16 * 60) - t
+        if t < 4*60:
+            return "Closed · Opens 9:30 AM ET"
+        if t < 9*60+30:
+            h, m = divmod(mins_to_open, 60)
+            opens_in = f"opens in {h}h {m}m" if h else f"opens in {m}m"
+            return f"Pre-market · {opens_in}"
+        if t < 16*60:
+            h, m = divmod(mins_to_close, 60)
+            closes_in = f"closes in {h}h {m}m" if h else f"closes in {m}m"
+            return f"🟢 Open · {closes_in}"
+        if t < 20*60:
+            return "After-hours · Closed 4:00 PM ET"
+        return "Closed · Opens 9:30 AM ET"
     except Exception:
-        return "Status unknown"
+        return "Open 9:30 AM – 4:00 PM ET"
 
 def _next_scan_label() -> str:
     """Returns human-readable label for the next scheduled scan + countdown."""
