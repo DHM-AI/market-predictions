@@ -1088,9 +1088,43 @@ if not _alpaca_closed:
         f'</div>',
         unsafe_allow_html=True)
 else:
-    _grid = "130px 70px 90px 90px 120px 1fr"
+    # Summary totals bar
+    _total_won  = sum(t["realized_pnl"] for t in _alpaca_closed if t["realized_pnl"] >= 0)
+    _total_lost = sum(t["realized_pnl"] for t in _alpaca_closed if t["realized_pnl"] < 0)
+    _net        = _total_won + _total_lost
+    _wins       = sum(1 for t in _alpaca_closed if t["realized_pnl"] >= 0)
+    _losses     = len(_alpaca_closed) - _wins
+    _net_c      = GREEN if _net >= 0 else RED
+    _net_sign   = "+" if _net >= 0 else "-"
+
+    st.markdown(
+        f'<div style="display:flex;gap:24px;align-items:center;padding:10px 16px;'
+        f'background:rgba(0,180,255,0.04);border:1px solid rgba(0,180,255,0.1);'
+        f'border-radius:8px;margin-bottom:6px;flex-wrap:wrap;">'
+        f'<div><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Net P&L</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:18px;font-weight:700;'
+        f'color:{_net_c};">{_net_sign}${abs(_net):,.2f}</span></div>'
+        f'<div><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Winners</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;'
+        f'color:{GREEN};">+${_total_won:,.2f} <span style="font-size:11px;">({_wins})</span></span></div>'
+        f'<div><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Losers</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;'
+        f'color:{RED};">-${abs(_total_lost):,.2f} <span style="font-size:11px;">({_losses})</span></span></div>'
+        f'<div><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Win Rate</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;'
+        f'color:{AMBER};">{_wins/len(_alpaca_closed)*100:.0f}%</span></div>'
+        f'</div>',
+        unsafe_allow_html=True)
+
+    # Scrollable table — fixed height with sidebar scrollbar
+    _grid = "110px 65px 85px 85px 130px 100px"
     hdr_html = (
-        f'<div class="hist-hdr" style="grid-template-columns:{_grid};">'
+        f'<div class="hist-hdr" style="grid-template-columns:{_grid};position:sticky;top:0;'
+        f'background:{SURF};z-index:1;">'
         f'<span class="hist-lbl">Closed At</span>'
         f'<span class="hist-lbl">Ticker</span>'
         f'<span class="hist-lbl">Entry</span>'
@@ -1107,29 +1141,37 @@ else:
         entry_p  = cp["entry_price"]
         exit_p   = cp["exit_price"]
         ts       = cp["closed_at"]
-        outcome  = cp.get("outcome","manual")
+        outcome  = cp.get("outcome", "manual")
         pc       = GREEN if rpl >= 0 else RED
         arr      = "▲" if rpl >= 0 else "▼"
+        bg       = "rgba(0,255,136,0.03)" if rpl >= 0 else "rgba(255,45,120,0.03)"
 
-        pnl_html = (f'<span style="color:{pc};font-family:JetBrains Mono,monospace;'
-                    f'font-weight:700;font-size:13px;">{arr} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>')
-        olabel   = "🎯 TAKE PROFIT" if outcome=="tp_hit" else "🛑 STOP LOSS" if outcome=="sl_hit" else "✋ MANUAL"
-        oc       = GREEN if outcome=="tp_hit" else RED if outcome=="sl_hit" else AMBER
-        out_html = f'<span style="color:{oc};font-size:10px;font-weight:800;">{olabel}</span>'
+        pnl_html = (
+            f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;font-size:13px;">'
+            f'{arr} ${abs(rpl):,.2f}</span>'
+            f'<span style="color:{pc};font-size:10px;margin-left:4px;">({rpct:+.1f}%)</span>'
+        )
+        olabel   = "🎯 TP" if outcome == "tp_hit" else "🛑 SL" if outcome == "sl_hit" else "✋ Manual"
+        oc       = GREEN if outcome == "tp_hit" else RED if outcome == "sl_hit" else AMBER
 
         rows_html += (
-            f'<div class="hist-row" style="grid-template-columns:{_grid};">'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT3};">{ts}</span>'
+            f'<div class="hist-row" style="grid-template-columns:{_grid};background:{bg};">'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:10px;color:{TEXT3};">{ts}</span>'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:{GLOW};">{ticker_}</span>'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:12px;color:{TEXT2};">${entry_p:.2f}</span>'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:12px;color:{TEXT};">${exit_p:.2f}</span>'
             f'<span>{pnl_html}</span>'
-            f'<span>{out_html}</span>'
+            f'<span style="color:{oc};font-size:11px;font-weight:700;">{olabel}</span>'
             f'</div>'
         )
+
+    # Wrap in fixed-height scrollable container
     st.markdown(
-        f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;overflow:hidden;">'
-        f'{hdr_html}{rows_html}</div>',
+        f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);'
+        f'border-radius:8px;overflow:hidden;">'
+        f'{hdr_html}'
+        f'<div style="max-height:320px;overflow-y:auto;">{rows_html}</div>'
+        f'</div>',
         unsafe_allow_html=True)
 
 # ── MONTHLY GOAL BAR (bottom of page — live fragment, refreshes every 30s) ─────
