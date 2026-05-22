@@ -883,13 +883,15 @@ def live_alpaca():
             if _cur and sl:
                 _sl_f = float(sl)
                 sl_pct_val = ((_cur - _sl_f) / _cur * 100) if is_long else ((_sl_f - _cur) / _cur * 100)
-                sl_pct_str = f'<span style="font-size:9px;color:rgba(255,45,120,0.7);margin-left:4px;">-{abs(sl_pct_val):.1f}%</span>'
+                sl_pct_str = (f'<span style="font-size:11px;font-weight:600;'
+                              f'color:{RED};margin-left:5px;">-{abs(sl_pct_val):.1f}%</span>')
             else:
                 sl_pct_str = ""
             if _cur and tp:
                 _tp_f = float(tp)
                 tp_pct_val = ((_tp_f - _cur) / _cur * 100) if is_long else ((_cur - _tp_f) / _cur * 100)
-                tp_pct_str = f'<span style="font-size:9px;color:rgba(0,255,136,0.7);margin-left:4px;">+{abs(tp_pct_val):.1f}%</span>'
+                tp_pct_str = (f'<span style="font-size:11px;font-weight:600;'
+                              f'color:{GREEN};margin-left:5px;">+{abs(tp_pct_val):.1f}%</span>')
             else:
                 tp_pct_str = ""
 
@@ -900,31 +902,32 @@ def live_alpaca():
                 if sl and entry and float(sl) > float(entry) and is_long:
                     _locked_pp = (float(sl) - float(entry)) * abs(float(p.get("qty", 0)))
                     _lock_str = (
-                        f'<span style="display:block;font-size:8px;font-weight:700;'
-                        f'letter-spacing:0.6px;color:{GREEN};margin-top:1px;">'
+                        f'<span style="display:block;font-size:10px;font-weight:700;'
+                        f'letter-spacing:0.4px;color:{GREEN};margin-top:2px;">'
                         f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
                     )
                 elif sl and entry and float(sl) < float(entry) and not is_long:
-                    # Short: locked profit when stop is below entry
                     _locked_pp = (float(entry) - float(sl)) * abs(float(p.get("qty", 0)))
                     _lock_str = (
-                        f'<span style="display:block;font-size:8px;font-weight:700;'
-                        f'letter-spacing:0.6px;color:{GREEN};margin-top:1px;">'
+                        f'<span style="display:block;font-size:10px;font-weight:700;'
+                        f'letter-spacing:0.4px;color:{GREEN};margin-top:2px;">'
                         f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
                     )
                 sl_str = (
                     f'<span style="color:{AMBER};font-family:JetBrains Mono,monospace;'
-                    f'font-size:11px;">🔒 {sl_val}</span>{sl_pct_str}'
-                    f'<span style="display:block;font-size:8px;color:{AMBER};'
-                    f'letter-spacing:0.8px;font-weight:700;">TRAILING</span>'
+                    f'font-size:13px;font-weight:700;">🔒 {sl_val}</span>{sl_pct_str}'
+                    f'<span style="display:block;font-size:9px;color:{AMBER};'
+                    f'letter-spacing:0.8px;font-weight:700;margin-top:1px;">TRAILING</span>'
                     + _lock_str
                 )
             elif sl:
-                sl_str = f'<span style="color:{RED};font-family:JetBrains Mono,monospace;">${sl:.2f}</span>{sl_pct_str}'
+                sl_str = (f'<span style="color:{RED};font-family:JetBrains Mono,monospace;'
+                          f'font-size:13px;font-weight:600;">${sl:.2f}</span>{sl_pct_str}')
             else:
                 sl_str = f'<span style="color:{TEXT3};">—</span>'
             tp_str = (
-                f'<span style="color:{GREEN};font-family:JetBrains Mono,monospace;">${tp:.2f}</span>{tp_pct_str}'
+                f'<span style="color:{GREEN};font-family:JetBrains Mono,monospace;'
+                f'font-size:13px;font-weight:600;">${tp:.2f}</span>{tp_pct_str}'
                 if tp else f'<span style="color:{TEXT3};">—</span>'
             )
 
