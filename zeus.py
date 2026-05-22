@@ -99,15 +99,30 @@ try:
         alpaca_acct      = get_account()
         alpaca_positions = get_positions()
 
-        # Fetch raw open orders for stop loss inspection
+        # Fetch active orders for stop loss inspection.
+        # Bracket stop-loss legs have status "held" (not "open"), so we must
+        # fetch ALL non-terminal orders and filter to active statuses.
         try:
             from alpaca.trading.client import TradingClient
             from alpaca.trading.requests import GetOrdersRequest
             from alpaca.trading.enums import QueryOrderStatus
+            from datetime import timedelta
             _client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY,
                                     paper=not ALPACA_LIVE_MODE)
-            alpaca_orders = _client.get_orders(
+            # Fetch open orders (includes take-profit legs)
+            _open_orders = _client.get_orders(
                 GetOrdersRequest(status=QueryOrderStatus.OPEN))
+            # Fetch all recent orders to catch "held" bracket stop-loss legs
+            _after = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00Z")
+            _all_recent = _client.get_orders(
+                GetOrdersRequest(status=QueryOrderStatus.ALL, after=_after, limit=500))
+            # Combine: keep orders in active states (open, held, accepted, pending_new)
+            _active_statuses = {"open", "held", "accepted", "pending_new", "new"}
+            _held = [o for o in _all_recent
+                     if str(getattr(o, "status", "")).lower().replace("orderstatus.", "")
+                     in _active_statuses]
+            alpaca_orders = list({str(getattr(o,"id","")): o
+                                  for o in (_open_orders + _held)}.values())
         except Exception as _e:
             print(f"  [ZEUS] Could not fetch raw orders: {_e}")
 
