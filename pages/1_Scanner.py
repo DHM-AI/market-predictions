@@ -238,22 +238,32 @@ div[data-testid="stSelectbox"] div {{ background:{SURF} !important; border-color
 </style>
 """, unsafe_allow_html=True)
 
-# ── STATIC DATA (predictions — changes 3x/day) ────────────────────────────────
-picks_df  = None
-last_scan = ""
-trades    = []
-db_ok     = False
+# ── STATIC DATA (predictions — changes 12x/day on weekdays) ──────────────────
+# On weekends or before the first scan of the day, fall back to the most
+# recent trading day that has data (up to 7 days back). This ensures the
+# dashboard always shows the last available scan — never a blank screen.
+picks_df       = None
+last_scan      = ""
+last_scan_date = ""
+trades         = []
+db_ok          = False
 
 try:
     from db import load_predictions_for_date, load_trades, db_available
+    from datetime import timedelta
     db_ok = db_available()
     if db_ok:
-        rows = load_predictions_for_date(datetime.today().strftime("%Y-%m-%d"))
-        if rows:
-            picks_df = pd.DataFrame(rows)
-            if "created_at" in picks_df.columns:
-                ts = pd.to_datetime(picks_df["created_at"].iloc[0])
-                last_scan = ts.strftime("%H:%M")
+        # Try today first, then walk back up to 7 days to find latest data
+        for _days_back in range(8):
+            _try_date = (datetime.today() - timedelta(days=_days_back)).strftime("%Y-%m-%d")
+            rows = load_predictions_for_date(_try_date)
+            if rows:
+                last_scan_date = _try_date
+                picks_df = pd.DataFrame(rows)
+                if "created_at" in picks_df.columns:
+                    ts = pd.to_datetime(picks_df["created_at"].iloc[0])
+                    last_scan = ts.strftime("%H:%M")
+                break
         try:
             trades = load_trades()[:20]
         except Exception:
@@ -393,7 +403,9 @@ with hc1:
         f'<span style="font-size:18px;font-weight:700;color:{TEXT};">🔺 ILLUMINATI</span>'
         f'<span class="live-pill"><span class="live-dot"></span>LIVE</span>'
         f'{mode_badge}'
-        f'<span style="font-size:11px;color:{TEXT3};">Last scan: {last_scan if last_scan else "pending"} &nbsp;·&nbsp; {datetime.today().strftime("%b %d %Y")}</span>'
+        f'<span style="font-size:11px;color:{TEXT3};">Last scan: {last_scan if last_scan else "pending"} &nbsp;·&nbsp; '
+        f'{"Today" if last_scan_date == datetime.today().strftime("%Y-%m-%d") else ("⚠ " + datetime.strptime(last_scan_date, "%Y-%m-%d").strftime("%a %b %d") + " (last trading day)") if last_scan_date else datetime.today().strftime("%b %d %Y")}'
+        f'</span>'
         f'</div>',
         unsafe_allow_html=True)
 with hc2:
@@ -1008,14 +1020,16 @@ with left:
                     st.markdown(card, unsafe_allow_html=True)
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     else:
+        _is_weekend = datetime.today().weekday() >= 5
+        _wait_msg   = ("Markets are closed on weekends — showing last available trading day data." if _is_weekend
+                       else "The AI agent runs automatically every weekday at <strong style='color:{GLOW};'>12× daily starting 7:00 AM ET</strong>.<br>Hit <strong style='color:{TEXT};'>⟳ Refresh Dashboard</strong> to check for new results.")
         st.markdown(f"""
         <div class="waiting">
           <div class="wait-ring"></div>
-          <div style="font-size:15px;font-weight:600;color:{TEXT};margin-bottom:6px;">Waiting for today's scan</div>
-          <div style="font-size:12px;color:{TEXT2};line-height:1.8;">
-            The AI agent runs automatically every weekday at <strong style="color:{GLOW};">12× daily starting 7:00 AM ET</strong>.<br>
-            Hit <strong style="color:{TEXT};">⟳ Refresh Dashboard</strong> to check for new results.
+          <div style="font-size:15px;font-weight:600;color:{TEXT};margin-bottom:6px;">
+            {"Weekend — market closed" if _is_weekend else "Waiting for today's scan"}
           </div>
+          <div style="font-size:12px;color:{TEXT2};line-height:1.8;">{_wait_msg}</div>
         </div>""", unsafe_allow_html=True)
 
 # (Positions are now inside live_alpaca() fragment above — auto-refreshes every 30s)
