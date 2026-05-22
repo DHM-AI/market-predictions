@@ -449,53 +449,83 @@ except Exception:
     pass   # regime check is non-blocking
 
 # ── LIVE FRAGMENT: portfolio strip + positions (auto-refreshes every 30s) ──────
-def _market_clock() -> str:
-    """Current ET time formatted as market clock."""
+
+def _get_alpaca_clock() -> dict:
+    """
+    Fetch market status directly from Alpaca's clock endpoint.
+    Always use Alpaca — never compute market hours manually.
+    Returns: {is_open, next_open, next_close, timestamp}
+    """
     try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo("America/New_York")).strftime("%I:%M %p ET")
+        from execution.alpaca import _get_client
+        client = _get_client()
+        clock  = client.get_clock()
+        return {
+            "is_open":    clock.is_open,
+            "next_open":  clock.next_open,
+            "next_close": clock.next_close,
+            "timestamp":  clock.timestamp,
+        }
     except Exception:
-        return datetime.utcnow().strftime("%H:%M UTC")
+        return {"is_open": None, "next_open": None, "next_close": None, "timestamp": None}
+
+
+def _market_clock() -> str:
+    """Current ET time from Alpaca clock."""
+    try:
+        clk = _get_alpaca_clock()
+        ts  = clk.get("timestamp")
+        if ts:
+            from zoneinfo import ZoneInfo
+            et = ts.astimezone(ZoneInfo("America/New_York"))
+            return et.strftime("%I:%M %p ET")
+    except Exception:
+        pass
+    return datetime.utcnow().strftime("%H:%M UTC")
+
 
 def _is_market_open() -> bool:
-    """True during regular market hours Mon–Fri 9:30–16:00 ET."""
-    try:
-        from zoneinfo import ZoneInfo
-        now = datetime.now(ZoneInfo("America/New_York"))
-        if now.weekday() >= 5:
-            return False
-        open_t  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
-        close_t = now.replace(hour=16, minute=0,  second=0, microsecond=0)
-        return open_t <= now < close_t
-    except Exception:
-        return False
+    """True if Alpaca says market is currently open."""
+    clk = _get_alpaca_clock()
+    return bool(clk.get("is_open"))
+
 
 def _market_status() -> str:
-    """Descriptive market status string with open/close times."""
+    """Market status + countdown from Alpaca clock — never computed manually."""
     try:
-        from zoneinfo import ZoneInfo
-        now = datetime.now(ZoneInfo("America/New_York"))
-        if now.weekday() >= 5:
-            return "Weekend · Opens Mon 9:30 AM ET"
-        t = now.hour * 60 + now.minute
-        # Minutes until open / close
-        mins_to_open  = (9 * 60 + 30) - t
-        mins_to_close = (16 * 60) - t
-        if t < 4*60:
-            return "Closed · Opens 9:30 AM ET"
-        if t < 9*60+30:
-            h, m = divmod(mins_to_open, 60)
-            opens_in = f"opens in {h}h {m}m" if h else f"opens in {m}m"
-            return f"Pre-market · {opens_in}"
-        if t < 16*60:
-            h, m = divmod(mins_to_close, 60)
-            closes_in = f"closes in {h}h {m}m" if h else f"closes in {m}m"
-            return f"🟢 Open · {closes_in}"
-        if t < 20*60:
-            return "After-hours · Closed 4:00 PM ET"
-        return "Closed · Opens 9:30 AM ET"
+        clk      = _get_alpaca_clock()
+        is_open  = clk.get("is_open")
+        ts       = clk.get("timestamp")
+        nxt_open = clk.get("next_open")
+        nxt_cls  = clk.get("next_close")
+
+        if ts is None:
+            return "Status unknown"
+
+        if is_open:
+            if nxt_cls:
+                diff   = int((nxt_cls - ts).total_seconds())
+                h, rem = divmod(diff, 3600)
+                m      = rem // 60
+                closes = f"closes in {h}h {m}m" if h else f"closes in {m}m"
+            else:
+                closes = "open"
+            return f"🟢 Open · {closes}"
+        else:
+            if nxt_open:
+                diff   = int((nxt_open - ts).total_seconds())
+                h, rem = divmod(diff, 3600)
+                m      = rem // 60
+                opens  = f"opens in {h}h {m}m" if h else f"opens in {m}m"
+            else:
+                opens = "soon"
+            from zoneinfo import ZoneInfo
+            et = ts.astimezone(ZoneInfo("America/New_York"))
+            if et.weekday() >= 5:
+                return f"Weekend · {opens}"
+            return f"Closed · {opens}"
     except Exception:
-        return "Open 9:30 AM – 4:00 PM ET"
+        return "Status unknown"
 
 def _next_scan_label() -> str:
     """Returns human-readable label for the next scheduled scan + countdown."""
