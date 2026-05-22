@@ -1075,8 +1075,15 @@ def live_goal_bar():
     portfolio_val  = st.session_state.get("_portfolio_value", BANKROLL)
     target_dollars = portfolio_val * MONTHLY_TARGET_PCT
 
-    # Read fresh values set by live_alpaca() fragment (both run every 30s)
-    realized_pl   = st.session_state.get("_realized_pl", 0.0)
+    # Monthly realized P&L — sum closed trades for current month from Alpaca history
+    _current_month = today_g.strftime("%Y-%m")
+    realized_pl = sum(
+        cp["realized_pnl"]
+        for cp in _alpaca_closed
+        if str(cp.get("closed_at", "")).startswith(_current_month)
+    )
+
+    # Unrealized — live from fragment (updates every 30s)
     unrealized_pl = st.session_state.get("_live_pl", 0.0)
     total_pl_goal = realized_pl + unrealized_pl
 
@@ -1090,8 +1097,11 @@ def live_goal_bar():
     pace_lbl   = f"{'▲' if pace_diff >= 0 else '▼'} ${abs(pace_diff):,.0f} {'ahead' if pace_diff >= 0 else 'behind'} pace"
 
     rl_sign  = "+" if realized_pl   >= 0 else "-"
-    ul_sign  = "+" if unrealized_pl >= 0 else "-"
     sep_sign = "+" if unrealized_pl >= 0 else "−"  # separator changes when unrealized is negative
+    # Round before display so components always add up to total
+    _rl_display  = round(realized_pl)
+    _ul_display  = round(unrealized_pl)
+    _tot_display = _rl_display + _ul_display
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
     st.markdown(f"""
@@ -1108,16 +1118,16 @@ def live_goal_bar():
         <div>
           <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
                color:{GREEN};margin-bottom:3px;">🔒 Realized (Closed)</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GREEN if realized_pl >= 0 else RED};">
-            {rl_sign}${abs(realized_pl):,.0f}
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GREEN if _rl_display >= 0 else RED};">
+            {rl_sign}${abs(_rl_display):,}
           </div>
         </div>
         <div style="color:{TEXT3};font-size:20px;">{sep_sign}</div>
         <div>
           <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
-               color:{GLOW if unrealized_pl >= 0 else RED};margin-bottom:3px;">📈 Unrealized (Open)</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GLOW if unrealized_pl >= 0 else RED};">
-            ${abs(unrealized_pl):,.0f}
+               color:{GLOW if _ul_display >= 0 else RED};margin-bottom:3px;">📈 Unrealized (Open)</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:{GLOW if _ul_display >= 0 else RED};">
+            ${abs(_ul_display):,}
           </div>
         </div>
         <div style="color:{TEXT3};font-size:20px;">=</div>
@@ -1125,8 +1135,8 @@ def live_goal_bar():
           <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
                color:{TEXT2};margin-bottom:3px;">Total</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;
-               color:{'#00ff88' if total_pl_goal > 0 else '#ff2d78' if total_pl_goal < 0 else TEXT2};">
-            {"+" if total_pl_goal >= 0 else "-"}${abs(total_pl_goal):,.0f}
+               color:{'#00ff88' if _tot_display > 0 else '#ff2d78' if _tot_display < 0 else TEXT2};">
+            {"+" if _tot_display >= 0 else "-"}${abs(_tot_display):,}
           </div>
         </div>
       </div>
