@@ -802,13 +802,8 @@ def live_alpaca():
                             or _filled_date > _trade_sl_tp[_sym].get("entry_ts", "")):
                         _trade_sl_tp.setdefault(_sym, {})["entry_ts"] = _filled_date
 
-                # ── Trailing stops: from open orders ──
-                _open_ords = _client_inst.get_orders(
-                    GetOrdersRequest(status=QueryOrderStatus.OPEN))
-                for _o in _open_ords:
-                    otype = str(getattr(_o, "type", "")).lower()
-                    if "trailing" in otype:
-                        _trailing_tickers.add(_o.symbol)
+                # Trailing tickers now come from get_positions() via is_trailing field
+                # (no separate order query needed)
 
         except Exception:
             pass
@@ -864,10 +859,11 @@ def live_alpaca():
             current  = p.get("current_price", 0)
             ticker_p = p["ticker"]
 
-            # SL/TP — prefer Alpaca bracket legs, fall back to trades DB
+            # SL/TP — from get_positions() (which reads live Alpaca orders),
+            # with Supabase trades table as last-resort fallback
             sl = p.get("stop_loss") or _trade_sl_tp.get(ticker_p, {}).get("stop_loss")
             tp = p.get("take_profit") or _trade_sl_tp.get(ticker_p, {}).get("take_profit")
-            is_trailing = ticker_p in _trailing_tickers
+            is_trailing = p.get("is_trailing", ticker_p in _trailing_tickers)
 
             # % distance from current price to SL / TP
             def _pct_dist(level, cur, pos_side):

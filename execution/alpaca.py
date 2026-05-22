@@ -326,18 +326,25 @@ def get_positions() -> list[dict]:
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
         orders    = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
-        sl_tp_map = {}  # ticker → {stop_loss, take_profit}
+        sl_tp_map    = {}   # ticker → {stop_loss, take_profit}
+        trailing_set = set()  # tickers with an active native trailing stop
         for o in orders:
             sym   = o.symbol
             otype = str(getattr(o, "type", "")).lower()
             # After bracket fills, child orders appear as standalone open orders:
             # TP leg → OrderType.LIMIT  (limit_price set)
             # SL leg → OrderType.STOP   (stop_price set)
-            if "limit" in otype and not "stop" in otype:
+            if "limit" in otype and "stop" not in otype:
                 lp = getattr(o, "limit_price", None)
                 if lp:
                     sl_tp_map.setdefault(sym, {})["take_profit"] = float(lp)
-            if "stop" in otype and "trailing" not in otype:  # exclude trailing stops — no static price
+            if "trailing" in otype:
+                # Native trailing stop — use live calculated stop_price as the SL
+                sp = getattr(o, "stop_price", None)
+                if sp:
+                    sl_tp_map.setdefault(sym, {})["stop_loss"] = float(sp)
+                trailing_set.add(sym)
+            elif "stop" in otype:
                 sp = getattr(o, "stop_price", None)
                 if sp:
                     sl_tp_map.setdefault(sym, {})["stop_loss"] = float(sp)
@@ -374,6 +381,7 @@ def get_positions() -> list[dict]:
                 "current_price":     float(p.current_price),
                 "stop_loss":         sl,
                 "take_profit":       tp,
+                "is_trailing":       sym in trailing_set,
             })
         return result
     except Exception as e:
