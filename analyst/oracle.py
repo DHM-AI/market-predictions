@@ -129,7 +129,15 @@ def run() -> dict:
             max_tokens = 600,
             messages   = [{"role": "user", "content": prompt}],
         )
-        directives = json.loads(response.content[0].text.strip())
+        raw_text = response.content[0].text.strip()
+        # Strip markdown code fences if Claude wraps the JSON in ```json ... ```
+        if raw_text.startswith("```"):
+            lines = raw_text.splitlines()
+            raw_text = "\n".join(
+                l for l in lines
+                if not l.strip().startswith("```")
+            ).strip()
+        directives = json.loads(raw_text)
         print(f"[ORACLE] Directive → {directives.get('scanner_directive','')}")
     except Exception as e:
         print(f"[ORACLE] Claude error: {e}")

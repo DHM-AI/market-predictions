@@ -303,18 +303,23 @@ try:
     today_dt      = datetime.today()
     days_in_month = monthrange(today_dt.year, today_dt.month)[1]
     day_of_month  = today_dt.day
-    portfolio_val = alpaca_acct.get("portfolio_value", BANKROLL)
-    target        = portfolio_val * MONTHLY_TARGET_PCT   # 10% of current account value
-    total_pl_pos  = sum(p.get("unrealized_pl", 0) for p in alpaca_positions)
+    portfolio_val  = alpaca_acct.get("portfolio_value", BANKROLL)
+    last_equity    = alpaca_acct.get("last_equity", portfolio_val)
+    target         = portfolio_val * MONTHLY_TARGET_PCT   # 10% of current account value
+    # Use today's P&L (equity delta + unrealized open) as a proxy for MTD progress
+    # since Alpaca paper doesn't expose a start-of-month snapshot
+    unrealized_pl  = sum(p.get("unrealized_pl", 0) for p in alpaca_positions)
+    today_delta    = portfolio_val - last_equity
+    total_pl_today = today_delta  # realized + unrealized move today
 
     # Progress estimate
-    progress_pct  = (total_pl_pos / target * 100) if target else 0
+    progress_pct  = (total_pl_today / target * 100) if target else 0
     pace_needed   = target * (day_of_month / days_in_month)
 
-    pace_label = "ahead of pace" if total_pl_pos >= pace_needed else f"behind pace (need ${pace_needed:,.0f} by day {day_of_month})"
+    pace_label = "ahead of pace" if total_pl_today >= pace_needed else f"behind pace (need ${pace_needed:,.0f} by day {day_of_month})"
     report.add("Monthly Goal (10%)", "PASS",
-               f"${total_pl_pos:+,.0f} of ${target:,.0f} · "
-               f"{progress_pct:.1f}% complete · {pace_label}")
+               f"Today ${total_pl_today:+,.0f} · target ${target:,.0f} · "
+               f"{progress_pct:.1f}% · {pace_label}")
 
 except Exception as e:
     report.add("Monthly Goal", "WARN", str(e)[:100])

@@ -303,8 +303,15 @@ def get_positions() -> list[dict]:
             sym   = p.symbol
             known = sl_tp_map.get(sym, {})
             # Fall back to computing from config constants when Alpaca doesn't expose the leg
-            sl = known.get("stop_loss")  or round(entry * (1 - KELLY_LOSS_PCT), 2)
-            tp = known.get("take_profit") or round(entry * (1 + MOVE_TARGET_PCT), 2)
+            is_short = "short" in str(getattr(p, "side", "")).lower()
+            if is_short:
+                # For short positions: SL is above entry (buy-to-cover), TP is below entry
+                sl = known.get("stop_loss")  or round(entry * (1 + KELLY_LOSS_PCT), 2)
+                tp = known.get("take_profit") or round(entry * (1 - MOVE_TARGET_PCT), 2)
+            else:
+                # For long positions: SL is below entry, TP is above entry
+                sl = known.get("stop_loss")  or round(entry * (1 - KELLY_LOSS_PCT), 2)
+                tp = known.get("take_profit") or round(entry * (1 + MOVE_TARGET_PCT), 2)
             result.append({
                 "ticker":            sym,
                 "qty":               float(p.qty),
@@ -476,13 +483,28 @@ def tighten_stop(ticker: str, stop_pct: float = 0.015) -> dict:
         if not qty:
             return {"status": "error", "reason": "Could not determine qty"}
 
-        # Place tighter stop
-        new_stop = round(price * (1 - stop_pct), 2)
+        # Determine if position is long or short to set correct stop side
+        positions_now = get_positions()
+        is_short = False
+        for pos in positions_now:
+            if pos["ticker"] == ticker:
+                is_short = "short" in str(pos.get("side", "")).lower()
+                break
+
+        # For longs:  stop is below current price (sell to exit)
+        # For shorts: stop is above current price (buy to exit)
+        if is_short:
+            new_stop = round(price * (1 + stop_pct), 2)
+            stop_side = OrderSide.BUY
+        else:
+            new_stop = round(price * (1 - stop_pct), 2)
+            stop_side = OrderSide.SELL
+
         from alpaca.trading.requests import MarketOrderRequest
         stop_req = StopOrderRequest(
             symbol        = ticker,
             qty           = qty,
-            side          = OrderSide.SELL,
+            side          = stop_side,
             time_in_force = TimeInForce.GTC,
             stop_price    = new_stop,
         )

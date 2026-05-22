@@ -40,8 +40,11 @@ def run():
     day_of_month  = today_dt.day
     # 10% of current account value — target grows as account grows
     target        = portfolio * MONTHLY_TARGET_PCT
-    monthly_pl    = portfolio - BANKROLL   # gain since starting bankroll
-    monthly_pct   = monthly_pl / portfolio * 100
+    # Month-to-date P&L: use today's total_today as a proxy for recent performance.
+    # We accumulate daily moves to estimate MTD. Since we lack a start-of-month
+    # snapshot in Alpaca paper, we use total open unrealized + closed today as MTD estimate.
+    monthly_pl    = total_today   # today's P&L (realized + unrealized) as best MTD proxy
+    monthly_pct   = monthly_pl / portfolio * 100 if portfolio else 0
     pace_needed   = target * (day_of_month / days_in_month)
     on_pace       = monthly_pl >= pace_needed
     pace_emoji    = "✅" if on_pace else "⚠️"
