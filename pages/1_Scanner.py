@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 import math
+import html as _html
 
 st.set_page_config(page_title="Illuminati", page_icon="🔺", layout="wide",
                    initial_sidebar_state="collapsed")
@@ -357,7 +358,7 @@ def tooltip_content(row):
         f"XGBoost prob: {xgb:.0%}" if xgb else "",
         f"Window: {dur}",
         f"<br><b style='color:#00d4ff;'>Signals triggered:</b>",
-    ] + [f"• {s}" for s in sigs[:4]]
+    ] + [f"• {_html.escape(s)}" for s in sigs[:4]]
     return "<br>".join(l for l in lines if l)
 
 def ring(score, acc, sz=62):
@@ -917,6 +918,12 @@ with left:
                 ks     = f"${kelly:,.0f}" if kelly else "Calculating..."
                 cname  = _cnames.get(ticker, "")
 
+                # HTML-escape all user data — company names and signal text
+                # can contain &, <, > that break the card HTML structure
+                safe_cname = _html.escape(cname)
+                safe_rea   = _html.escape(rea)
+                safe_dur   = _html.escape(str(dur))
+
                 card = f"""
 <div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">
   <div class="tip">{tip}</div>
@@ -925,15 +932,15 @@ with left:
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
     <div>
       <div class="card-ticker" style="color:{acc};text-shadow:0 0 18px {acc}44;">{ticker}</div>
-      {f'<div style="font-size:10px;color:{TEXT3};margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">{cname}</div>' if cname else ''}
+      {f'<div style="font-size:10px;color:{TEXT3};margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">{safe_cname}</div>' if safe_cname else ''}
       <div class="card-action" style="background:{ab};border:1px solid {abrd};color:{acc};">{alabel}</div>
-      <div style="font-size:10px;color:{TEXT2};margin-top:4px;">{dur}</div>
+      <div style="font-size:10px;color:{TEXT2};margin-top:4px;">{safe_dur}</div>
     </div>
     {ring(score, acc)}
   </div>
   <div class="card-div"></div>
   <div class="stars" style="color:{acc};">{stars(score)}</div>
-  <div class="card-reason">{rea}</div>
+  <div class="card-reason">{safe_rea}</div>
   <div class="card-footer">
     <div>
       <div class="card-pos-lbl">Position Size</div>
