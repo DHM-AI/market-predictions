@@ -7,6 +7,24 @@ import math
 st.set_page_config(page_title="Illuminati", page_icon="🔺", layout="wide",
                    initial_sidebar_state="collapsed")
 
+
+# ── Company name lookup — module-level so @st.cache_data works properly ────────
+# Defined here (not inside fragments) so Streamlit can cache across reruns.
+@st.cache_data(ttl=86400, show_spinner=False)
+def _get_company_names(tickers: tuple) -> dict:
+    """Fetch company short names from yfinance — cached 24 hours."""
+    names = {}
+    try:
+        import yfinance as yf
+        for t in tickers:
+            try:
+                names[t] = yf.Ticker(t).info.get("shortName") or ""
+            except Exception:
+                names[t] = ""
+    except Exception:
+        pass
+    return names
+
 BG    = "#03060d"
 SURF  = "#07111f"
 SURF2 = "#0c1d30"
@@ -684,26 +702,11 @@ def live_alpaca():
             unsafe_allow_html=True
         )
 
-        # Company names — cached 24h, fetched once for all position tickers
-        @st.cache_data(ttl=86400, show_spinner=False)
-        def _pos_company_names(tickers: tuple) -> dict:
-            names = {}
-            try:
-                import yfinance as yf
-                for t in tickers:
-                    try:
-                        names[t] = yf.Ticker(t).info.get("shortName") or ""
-                    except Exception:
-                        names[t] = ""
-            except Exception:
-                pass
-            return names
-
         # Sort: biggest winners first, biggest losers last
         positions = sorted(positions, key=lambda p: p.get("unrealized_pl", 0), reverse=True)
 
         _pos_tickers = tuple(p["ticker"] for p in positions)
-        _pos_names   = _pos_company_names(_pos_tickers)
+        _pos_names   = _get_company_names(_pos_tickers)  # module-level cached fn
 
         for p in positions:
             pl       = p.get("unrealized_pl", 0)
@@ -859,32 +862,15 @@ with left:
         f'<div class="sec">Today\'s Trade Recommendations <span class="sec-n">{n_picks} setups</span></div>',
         unsafe_allow_html=True)
 
-    @st.cache_data(ttl=86400, show_spinner=False)
-    def _company_names(tickers: tuple) -> dict:
-        """Fetch company short names from yfinance — cached 24h."""
-        names = {}
-        try:
-            import yfinance as yf
-            for t in tickers:
-                try:
-                    info = yf.Ticker(t).fast_info
-                    # fast_info doesn't have name; use Ticker.info shortName
-                    names[t] = yf.Ticker(t).info.get("shortName") or ""
-                except Exception:
-                    names[t] = ""
-        except Exception:
-            pass
-        return names
-
     if picks_df is not None and not picks_df.empty:
         sorted_df = picks_df[
             (picks_df["direction"] != "mixed") &
             (picks_df["score"] >= 70)
         ].sort_values("score", ascending=False)
 
-        # Pre-fetch company names for visible tickers (cached 24h)
+        # Pre-fetch company names — uses module-level cached function
         _visible_tickers = tuple(sorted_df["ticker"].tolist())
-        _cnames = _company_names(_visible_tickers)
+        _cnames = _get_company_names(_visible_tickers)
 
         chunks = [sorted_df.iloc[i:i+3] for i in range(0, len(sorted_df), 3)]
         for chunk in chunks:
