@@ -1174,30 +1174,32 @@ else:
         bg       = "rgba(0,255,136,0.03)" if rpl >= 0 else "rgba(255,45,120,0.03)"
 
         pnl_html = (
-            f'<span style="color:{pc};font-family:JetBrains Mono,monospace;font-weight:700;font-size:13px;">'
-            f'{arr} ${abs(rpl):,.2f}</span>'
-            f'<span style="color:{pc};font-size:10px;margin-left:4px;">({rpct:+.1f}%)</span>'
+            f'<span style="color:{pc};font-family:JetBrains Mono,monospace;'
+            f'font-weight:700;font-size:12px;">{arr} ${abs(rpl):,.2f} ({rpct:+.1f}%)</span>'
         )
-        olabel   = "🎯 TP" if outcome == "tp_hit" else "🛑 SL" if outcome == "sl_hit" else "✋ Manual"
-        oc       = GREEN if outcome == "tp_hit" else RED if outcome == "sl_hit" else AMBER
+        olabel = "🎯 TP" if outcome == "tp_hit" else "🛑 SL" if outcome == "sl_hit" else "✋"
+        oc     = GREEN if outcome == "tp_hit" else RED if outcome == "sl_hit" else AMBER
 
         rows_html += (
-            f'<div class="hist-row" style="grid-template-columns:{_grid};background:{bg};">'
+            f'<div class="hist-row" style="grid-template-columns:{_grid};'
+            f'background:{bg};padding:7px 16px;">'
             f'<span style="font-family:JetBrains Mono,monospace;font-size:10px;color:{TEXT3};">{ts}</span>'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:{GLOW};">{ticker_}</span>'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:12px;color:{TEXT2};">${entry_p:.2f}</span>'
-            f'<span style="font-family:JetBrains Mono,monospace;font-size:12px;color:{TEXT};">${exit_p:.2f}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:{GLOW};">{ticker_}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT2};">${entry_p:.2f}</span>'
+            f'<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:{TEXT};">${exit_p:.2f}</span>'
             f'<span>{pnl_html}</span>'
             f'<span style="color:{oc};font-size:11px;font-weight:700;">{olabel}</span>'
             f'</div>'
         )
 
-    # Wrap in fixed-height scrollable container
+    # Fixed height — shows ~6 rows, scrollable for the rest
     st.markdown(
         f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);'
         f'border-radius:8px;overflow:hidden;">'
         f'{hdr_html}'
-        f'<div style="max-height:320px;overflow-y:auto;">{rows_html}</div>'
+        f'<div style="height:264px;overflow-y:scroll;'
+        f'scrollbar-width:thin;scrollbar-color:rgba(0,180,255,0.3) transparent;">'
+        f'{rows_html}</div>'
         f'</div>',
         unsafe_allow_html=True)
 
