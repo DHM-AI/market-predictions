@@ -622,12 +622,22 @@ def live_alpaca():
 
     _tot_sign  = "+" if _total_today >= 0 else ""
 
+    # All-time P&L = portfolio vs starting bankroll
+    from config import BANKROLL as _BANKROLL
+    _alltime_pl    = portfolio - _BANKROLL
+    _alltime_color = GREEN if _alltime_pl > 0 else RED if _alltime_pl < 0 else TEXT2
+    _alltime_sign  = "+" if _alltime_pl >= 0 else ""
+
     st.markdown(
-        f'<div class="metrics-row" style="grid-template-columns:repeat(7,1fr);">'
+        f'<div class="metrics-row" style="grid-template-columns:repeat(8,1fr);">'
         + mc("Portfolio Value",
              f"${portfolio:,.0f}", "Total equity",
              GLOW, "Total Alpaca account value — cash + open positions.")
-        + mc("Total P&L Today",
+        + mc("Total P&L",
+             f"{_alltime_sign}${abs(_alltime_pl):,.2f}", "Since account started",
+             _alltime_color,
+             f"All-time profit vs starting bankroll of ${_BANKROLL:,.0f}.")
+        + mc("P&L Today",
              f"{_tot_sign}${abs(_total_today):,.2f}", "Closed + open combined",
              _total_color,
              "Today's total P&L: closed trades + floating unrealized.")
