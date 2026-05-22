@@ -684,6 +684,24 @@ def live_alpaca():
             unsafe_allow_html=True
         )
 
+        # Company names — cached 24h, fetched once for all position tickers
+        @st.cache_data(ttl=86400, show_spinner=False)
+        def _pos_company_names(tickers: tuple) -> dict:
+            names = {}
+            try:
+                import yfinance as yf
+                for t in tickers:
+                    try:
+                        names[t] = yf.Ticker(t).info.get("shortName") or ""
+                    except Exception:
+                        names[t] = ""
+            except Exception:
+                pass
+            return names
+
+        _pos_tickers = tuple(p["ticker"] for p in positions)
+        _pos_names   = _pos_company_names(_pos_tickers)
+
         for p in positions:
             pl       = p.get("unrealized_pl", 0)
             plpct    = p.get("unrealized_pl_pct", 0)
@@ -749,7 +767,8 @@ def live_alpaca():
                     f'gap:0 16px;align-items:center;padding:10px 14px;'
                     f'background:{SURF};border:1px solid rgba(0,180,255,0.08);'
                     f'border-radius:6px;margin-bottom:4px;transition:border-color 0.15s;">'
-                    f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;color:{GLOW};">{ticker_p}</span>'
+                    f'<span><div style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;color:{GLOW};">{ticker_p}</div>'
+                    f'<div style="font-size:9px;color:{TEXT3};margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:78px;">{_pos_names.get(ticker_p,"")}</div></span>'
                     f'<span>{type_badge}</span>'
                     f'<span style="background:{side_c};border:1px solid {side_bc};color:{side_tc};'
                     f'font-size:9px;font-weight:800;letter-spacing:1px;padding:2px 6px;border-radius:3px;">{side_lbl}</span>'
