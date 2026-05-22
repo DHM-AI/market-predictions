@@ -603,12 +603,67 @@ def live_alpaca():
 
     # ── Open positions ────────────────────────────────────────────────────────
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="sec">Open Positions <span class="sec-n">{len(positions)}</span>'
-        f'<span style="font-size:9px;color:{TEXT3};margin-left:8px;">· updates every 30s</span></div>',
-        unsafe_allow_html=True)
 
-    # Confirmation state
+    # Section header + Close All button on same row
+    sec_col, btn_col = st.columns([5, 1])
+    with sec_col:
+        st.markdown(
+            f'<div class="sec">Open Positions <span class="sec-n">{len(positions)}</span>'
+            f'<span style="font-size:9px;color:{TEXT3};margin-left:8px;">· updates every 30s</span></div>',
+            unsafe_allow_html=True)
+    with btn_col:
+        if positions and st.button("⚡ Close All", use_container_width=True,
+                                   key="close_all_btn",
+                                   help="Close all open positions at market price"):
+            st.session_state["confirm_close_all"] = True
+            st.rerun()
+
+    # ── Confirm close all ─────────────────────────────────────────────────────
+    if "confirm_close_all" not in st.session_state:
+        st.session_state["confirm_close_all"] = False
+
+    if st.session_state.get("confirm_close_all"):
+        total_pl = sum(p.get("unrealized_pl", 0) for p in positions)
+        pl_color = GREEN if total_pl >= 0 else RED
+        pl_sign  = "+" if total_pl >= 0 else ""
+        st.markdown(
+            f'<div style="background:rgba(255,45,120,0.10);border:1px solid rgba(255,45,120,0.4);'
+            f'border-radius:8px;padding:16px 20px;margin-bottom:14px;">'
+            f'<div style="font-size:14px;font-weight:700;color:{RED};margin-bottom:6px;">'
+            f'⚠ Close ALL {len(positions)} positions at market price?</div>'
+            f'<div style="font-size:12px;color:{TEXT2};">Current unrealized P&L: '
+            f'<span style="color:{pl_color};font-family:JetBrains Mono,monospace;font-weight:700;">'
+            f'{pl_sign}${abs(total_pl):,.2f}</span> · This cannot be undone.</div>'
+            f'</div>',
+            unsafe_allow_html=True)
+        ca1, ca2, ca3, ca4 = st.columns([3, 1, 1, 1])
+        with ca2:
+            if st.button("✓ Close All", type="primary", use_container_width=True,
+                         key="confirm_close_all_yes"):
+                from execution.alpaca import close_position
+                closed, failed = [], []
+                with st.spinner(f"Closing {len(positions)} positions..."):
+                    for p in positions:
+                        try:
+                            r = close_position(p["ticker"])
+                            if r.get("status") == "closed":
+                                closed.append(p["ticker"])
+                            else:
+                                failed.append(p["ticker"])
+                        except Exception:
+                            failed.append(p["ticker"])
+                st.session_state["confirm_close_all"] = False
+                if closed:
+                    st.success(f"✓ Closed {len(closed)} positions: {', '.join(closed)}")
+                if failed:
+                    st.error(f"Failed to close: {', '.join(failed)}")
+                st.rerun()
+        with ca3:
+            if st.button("✗ Cancel", use_container_width=True, key="confirm_close_all_no"):
+                st.session_state["confirm_close_all"] = False
+                st.rerun()
+
+    # Confirmation state (single position)
     if "confirm_close" not in st.session_state:
         st.session_state["confirm_close"] = None
 
