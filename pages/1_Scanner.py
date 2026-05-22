@@ -895,11 +895,29 @@ def live_alpaca():
 
             if is_trailing:
                 sl_val = f'${sl:.2f}' if sl else "tracking"
+                # Locked profit — only show when trailing stop is above entry (profit floor guaranteed)
+                _lock_str = ""
+                if sl and entry and float(sl) > float(entry) and is_long:
+                    _locked_pp = (float(sl) - float(entry)) * abs(float(p.get("qty", 0)))
+                    _lock_str = (
+                        f'<span style="display:block;font-size:8px;font-weight:700;'
+                        f'letter-spacing:0.6px;color:{GREEN};margin-top:1px;">'
+                        f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
+                    )
+                elif sl and entry and float(sl) < float(entry) and not is_long:
+                    # Short: locked profit when stop is below entry
+                    _locked_pp = (float(entry) - float(sl)) * abs(float(p.get("qty", 0)))
+                    _lock_str = (
+                        f'<span style="display:block;font-size:8px;font-weight:700;'
+                        f'letter-spacing:0.6px;color:{GREEN};margin-top:1px;">'
+                        f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
+                    )
                 sl_str = (
                     f'<span style="color:{AMBER};font-family:JetBrains Mono,monospace;'
                     f'font-size:11px;">🔒 {sl_val}</span>{sl_pct_str}'
                     f'<span style="display:block;font-size:8px;color:{AMBER};'
                     f'letter-spacing:0.8px;font-weight:700;">TRAILING</span>'
+                    + _lock_str
                 )
             elif sl:
                 sl_str = f'<span style="color:{RED};font-family:JetBrains Mono,monospace;">${sl:.2f}</span>{sl_pct_str}'
