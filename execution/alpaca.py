@@ -205,6 +205,57 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
         return result
 
     except Exception as e:
+        err_str = str(e)
+        # Alpaca rejects when our estimated price differs from actual market price.
+        # Parse base_price from error and retry with corrected stop/TP.
+        if "base_price" in err_str and "stop_price" in err_str:
+            try:
+                import json, re
+                m = re.search(r'"base_price"\s*:\s*"?([\d.]+)"?', err_str)
+                if m:
+                    actual_price = float(m.group(1))
+                    if side == "buy":
+                        stop_price  = round(actual_price * (1 - KELLY_LOSS_PCT), 2)
+                        limit_price = round(actual_price * (1 + MOVE_TARGET_PCT), 2)
+                    else:
+                        stop_price  = round(actual_price * (1 + KELLY_LOSS_PCT), 2)
+                        limit_price = round(actual_price * (1 - MOVE_TARGET_PCT), 2)
+                    qty = max(1, round(dollar_amount / actual_price))
+                    print(f"[APEX] Retrying bracket with corrected price ${actual_price:.2f} "
+                          f"→ SL ${stop_price:.2f} / TP ${limit_price:.2f}")
+                    from alpaca.trading.client import TradingClient
+                    from alpaca.trading.requests import (MarketOrderRequest,
+                                                          TakeProfitRequest, StopLossRequest)
+                    from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+                    client    = _get_client()
+                    order_req = MarketOrderRequest(
+                        symbol        = ticker,
+                        qty           = qty,
+                        side          = OrderSide.BUY if side == "buy" else OrderSide.SELL,
+                        time_in_force = TimeInForce.DAY,
+                        order_class   = OrderClass.BRACKET,
+                        take_profit   = TakeProfitRequest(limit_price=limit_price),
+                        stop_loss     = StopLossRequest(stop_price=stop_price),
+                    )
+                    order = client.submit_order(order_req)
+                    result = {
+                        "status": "submitted", "order_id": str(order.id),
+                        "ticker": ticker, "side": side, "qty": qty,
+                        "entry_price": actual_price, "stop_loss": stop_price,
+                        "take_profit": limit_price,
+                        "dollar_amount": round(qty * actual_price, 2),
+                        "mode": mode, "timestamp": datetime.now().isoformat(),
+                        "reason": reason,
+                    }
+                    try:
+                        import db
+                        if db.db_available():
+                            db.save_trade(result)
+                    except Exception:
+                        pass
+                    return result
+            except Exception as retry_err:
+                print(f"[APEX] Bracket retry failed: {retry_err}")
         print(f"[APEX] Bracket order failed: {e}. Falling back to simple order.")
         return _place_simple_order(ticker, dollar_amount, side, mode, reason)
 
