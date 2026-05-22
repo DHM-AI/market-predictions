@@ -608,38 +608,45 @@ def live_alpaca():
             f'{tip_html}</div>'
         )
 
-    # True daily P&L = Alpaca equity vs yesterday's close (includes everything)
+    # True daily P&L = Alpaca equity vs yesterday's close
     _last_equity    = acct.get("last_equity", portfolio)
-    _total_today    = portfolio - _last_equity          # actual account gain today
-    _unrealized_pl  = total_pl                          # open positions floating
-    _realized_today = _total_today - _unrealized_pl     # locked in (closed trades)
+    _total_today    = portfolio - _last_equity
+    _unrealized_pl  = total_pl
+    _realized_today = _total_today - _unrealized_pl   # trades closed today only
     _total_sign     = "+" if _total_today >= 0 else ""
     _total_color    = GREEN if _total_today > 0 else RED if _total_today < 0 else TEXT2
-
-    _rl_sub    = f"🔒 ${_realized_today:+,.0f} closed · 📈 ${_unrealized_pl:+,.0f} open"
+    _rl_color       = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
+    _ul_color       = GREEN if _unrealized_pl  > 0 else RED if _unrealized_pl  < 0 else TEXT2
+    _rl_sign        = "+" if _realized_today >= 0 else ""
+    _ul_sign        = "+" if _unrealized_pl  >= 0 else ""
 
     st.markdown(
         f'<div class="metrics-row" style="grid-template-columns:repeat(6,1fr);">'
-        + mc("Portfolio Value",  f"${portfolio:,.0f}",            "Total equity",
-             GLOW, "Total Alpaca account value — positions + cash.")
-        + mc("Total P&L Today",  f"{_total_sign}${abs(_total_today):,.2f}",
-             _rl_sub,
-             _total_color if _total_today != 0 else TEXT2,
-             "Realized (closed trades) + unrealized (open positions) combined. "
-             "Realized is locked in; unrealized moves with the market.")
-        + mc("Buying Power",    f"${buying_power:,.0f}",          "Available now",
+        + mc("Portfolio Value",
+             f"${portfolio:,.0f}", "Total equity",
+             GLOW, "Total Alpaca account value — cash + open positions.")
+        + mc("Closed Today",
+             f"{_rl_sign}${abs(_realized_today):,.2f}",
+             f"Locked in since yesterday's close",
+             _rl_color,
+             "Realized P&L from trades closed today only. "
+             "Resets every morning at yesterday's closing equity.")
+        + mc("Open Now",
+             f"{_ul_sign}${abs(_unrealized_pl):,.2f}",
+             f"{len(positions)} position{'s' if len(positions) != 1 else ''} live",
+             _ul_color,
+             "Floating P&L on all currently open positions. Updates every 30s.")
+        + mc("Buying Power",
+             f"${buying_power:,.0f}", "Available now",
              TEXT, "Cash available for new positions right now.")
-        + mc("AI Setups Today", str(_n_picks) if _n_picks else "—", "Score ≥ 50",
+        + mc("AI Setups Today",
+             str(_n_picks) if _n_picks else "—", "Score ≥ 50",
              GREEN if _n_picks else TEXT2,
-             "Tickers flagged today. Agent scans 12× daily: 7AM · 8AM · 9AM · 9:30AM · 10:30AM · 11AM · 12PM · 1PM · 2PM · 3PM · 3:30PM · 4PM ET.")
-        + mc("Auto-Executing",  str(_n_auto) if _n_auto else "0",  "Score ≥ 70",
-             GREEN if _n_auto else TEXT2,
-             "These will be auto-traded via Alpaca bracket orders.")
+             "Tickers flagged today. Agent scans 12× daily.")
         + mc("Market Clock",
-             _market_clock(),
-             _market_status(),
+             _market_clock(), _market_status(),
              GREEN if _is_market_open() else RED,
-             "Market time from Alpaca. GREEN = market open, AMBER = pre/after hours.")
+             "Market status from Alpaca. GREEN = open.")
         + f'</div>',
         unsafe_allow_html=True)
 
