@@ -985,37 +985,50 @@ with left:
                 ks     = f"${kelly:,.0f}" if kelly else "Calculating..."
                 cname  = _cnames.get(ticker, "")
 
-                # HTML-escape all user data — company names and signal text
-                # can contain &, <, > that break the card HTML structure
+                # Escape user data — build fragments separately (no nested f-strings)
                 safe_cname = _html.escape(cname)
                 safe_rea   = _html.escape(rea)
                 safe_dur   = _html.escape(str(dur))
 
-                card = f"""
-<div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">
-  <div class="tip">{tip}</div>
-  <span class="c c-tl"></span><span class="c c-tr"></span>
-  <span class="c c-bl"></span><span class="c c-br"></span>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-    <div>
-      <div class="card-ticker" style="color:{acc};text-shadow:0 0 18px {acc}44;">{ticker}</div>
-      {f'<div style="font-size:10px;color:{TEXT3};margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">{safe_cname}</div>' if safe_cname else ''}
-      <div class="card-action" style="background:{ab};border:1px solid {abrd};color:{acc};">{alabel}</div>
-      <div style="font-size:10px;color:{TEXT2};margin-top:4px;">{safe_dur}</div>
-    </div>
-    {ring(score, acc)}
-  </div>
-  <div class="card-div"></div>
-  <div class="stars" style="color:{acc};">{stars(score)}</div>
-  <div class="card-reason">{safe_rea}</div>
-  <div class="card-footer">
-    <div>
-      <div class="card-pos-lbl">Position Size</div>
-      <div class="card-pos" style="color:{acc};">{ks}</div>
-    </div>
-    {"<span class='auto-yes'>⚡ AUTO-EXECUTING</span>" if auto else "<span class='auto-no'>Manual · score &lt; 70</span>"}
-  </div>
-</div>"""
+                cname_html = (
+                    '<div style="font-size:10px;color:' + TEXT3 +
+                    ';margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">' +
+                    safe_cname + '</div>'
+                ) if safe_cname else ''
+
+                auto_html = (
+                    "<span class='auto-yes'>&#9889; AUTO-EXECUTING</span>"
+                    if auto else
+                    "<span class='auto-no'>Manual &middot; score &lt; 70</span>"
+                )
+
+                card = "".join([
+                    f'<div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">',
+                    f'<div class="tip">{tip}</div>',
+                    '<span class="c c-tl"></span><span class="c c-tr"></span>',
+                    '<span class="c c-bl"></span><span class="c c-br"></span>',
+                    '<div style="display:flex;justify-content:space-between;'
+                    'align-items:flex-start;margin-bottom:10px;"><div>',
+                    f'<div class="card-ticker" style="color:{acc};'
+                    f'text-shadow:0 0 18px {acc}44;">{ticker}</div>',
+                    cname_html,
+                    f'<div class="card-action" style="background:{ab};'
+                    f'border:1px solid {abrd};color:{acc};">{alabel}</div>',
+                    f'<div style="font-size:10px;color:{TEXT2};'
+                    f'margin-top:4px;">{safe_dur}</div>',
+                    '</div>',
+                    ring(score, acc),
+                    '</div>',
+                    '<div class="card-div"></div>',
+                    f'<div class="stars" style="color:{acc};">{stars(score)}</div>',
+                    f'<div class="card-reason">{safe_rea}</div>',
+                    '<div class="card-footer"><div>',
+                    '<div class="card-pos-lbl">Position Size</div>',
+                    f'<div class="card-pos" style="color:{acc};">{ks}</div>',
+                    '</div>',
+                    auto_html,
+                    '</div></div>',
+                ])
                 with cols[ci]:
                     st.markdown(card, unsafe_allow_html=True)
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
