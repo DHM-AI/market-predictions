@@ -150,6 +150,20 @@ def run_scan(send_email: bool = True,
     print(f"  Bankroll: ${BANKROLL:,.0f}")
     print(f"{'='*62}\n")
 
+    # ── ORACLE directives — read before every scan ────────────────
+    oracle_directives: dict = {}
+    try:
+        from analyst.oracle import get_latest_directives
+        oracle_directives = get_latest_directives()
+        if oracle_directives:
+            print(f"[ORACLE] Active directive → {oracle_directives.get('scanner_directive','none')}")
+            if oracle_directives.get("avoid_sectors"):
+                print(f"[ORACLE] Avoiding sectors: {oracle_directives['avoid_sectors']}")
+            if oracle_directives.get("favor_directions"):
+                print(f"[ORACLE] Favoring: {oracle_directives['favor_directions']}")
+    except Exception as e:
+        print(f"[ORACLE] Could not load directives: {e}")
+
     # ── 0. Market Regime ─────────────────────────────────────────
     print(f"[0/5] REGIME — VIX + SPY trend + sector breadth")
     _neutral_regime = {"regime":"neutral","vix":20.0,"vix_level":"normal",

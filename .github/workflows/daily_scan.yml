@@ -16,7 +16,7 @@ on:
     - cron: '0 19 * * 1-5'    #  3:00 PM ET — pre-power hour
     - cron: '30 19 * * 1-5'   #  3:30 PM ET — power hour
     - cron: '0 20 * * 1-5'    #  4:00 PM ET — after-hours check
-    - cron: '0 14 * * 0'      # Sunday 10 AM ET — weekly post-mortem
+    - cron: '0 2 * * 2-6'     # Mon–Fri 10 PM ET — ORACLE daily learning (2 AM UTC next day)
 
   workflow_dispatch:
     inputs:
@@ -48,9 +48,9 @@ jobs:
       - name: Run agent
         run: |
           if [ "${{ github.event.inputs.mode }}" = "postmortem" ]; then
-            python agent.py --postmortem
-          elif [ "${{ github.event.schedule }}" = "0 14 * * 0" ]; then
-            python agent.py --postmortem
+            python -c "from analyst.oracle import run; run()"
+          elif [ "${{ github.event.schedule }}" = "0 2 * * 2-6" ]; then
+            python -c "from analyst.oracle import run; run()"
           elif [ "${{ github.event.inputs.mode }}" = "scan-no-trade" ]; then
             python agent.py --no-trade
           else
