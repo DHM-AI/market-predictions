@@ -219,9 +219,19 @@ def run_scan(send_email: bool = True,
 
     # ── 3. Predict ────────────────────────────────────────────────
     print(f"\n[PYTHIA] PREDICT — XGBoost + blended sentiment")
+    # Fetch earnings dates in parallel (610 sequential calls would timeout GitHub Actions)
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
     earnings_map: dict = {}
-    for ticker in tickers:
-        earnings_map[ticker] = get_earnings_days(ticker)
+    print(f"      Fetching earnings dates for {len(tickers)} tickers (parallel)...")
+    with ThreadPoolExecutor(max_workers=30) as _pool:
+        _futures = {_pool.submit(get_earnings_days, t): t for t in tickers}
+        for _fut in _as_completed(_futures):
+            t = _futures[_fut]
+            try:
+                earnings_map[t] = _fut.result()
+            except Exception:
+                earnings_map[t] = None
+    print(f"      Earnings fetch done ({sum(1 for v in earnings_map.values() if v is not None)} with upcoming dates)")
 
     picks_df = predict_universe(tickers, ohlcv_map, sentiment_map, earnings_map)
 

@@ -712,7 +712,55 @@ def trail_positions(
                     pass
 
             except Exception as e:
-                print(f"[AEGIS] {ticker} error: {e} — skipping")
+                # Alpaca won't allow trailing stops on fractional positions.
+                # Simulate trailing: move fixed stop up to 3% below current price.
+                if "fractional" in str(e).lower():
+                    _simulated = False
+                    try:
+                        current_price = p.get("current_price") or p.get("avg_entry_price", 0)
+                        new_stop = round(current_price * (1 - trail), 2)
+                        entry_px  = p.get("avg_entry_price", 0)
+                        if new_stop > entry_px:  # only move stop if it locks in profit
+                            # Cancel old stops
+                            for o in ticker_orders:
+                                otype = str(getattr(o, "type", "")).lower()
+                                if "stop" in otype and "limit" not in otype and "trailing" not in otype:
+                                    try:
+                                        client.cancel_order_by_id(str(o.id))
+                                    except Exception:
+                                        pass
+                            # Place new fixed stop above entry (locking in profit)
+                            from alpaca.trading.requests import StopOrderRequest
+                            stop_req = StopOrderRequest(
+                                symbol        = ticker,
+                                qty           = qty,
+                                side          = OrderSide.SELL,
+                                time_in_force = TimeInForce.GTC,
+                                stop_price    = new_stop,
+                            )
+                            try:
+                                sord = client.submit_order(stop_req)
+                            except Exception:
+                                stop_req.time_in_force = TimeInForce.DAY
+                                sord = client.submit_order(stop_req)
+                            print(f"[AEGIS] {ticker} fractional — simulated trail: "
+                                  f"stop moved to ${new_stop:.2f} (locks in profit)")
+                            _simulated = True
+                            results.append({
+                                "ticker":       ticker,
+                                "pct_gain":     round(pct_gain, 2),
+                                "trail_pct":    trail,
+                                "order_id":     str(sord.id),
+                                "cancelled_sl": 0,
+                                "status":       "simulated_trailing",
+                                "timestamp":    datetime.now().isoformat(),
+                            })
+                    except Exception as se:
+                        print(f"[AEGIS] {ticker} simulated trail failed: {se}")
+                    if not _simulated:
+                        print(f"[AEGIS] {ticker}: fractional, stop already above entry — no move needed")
+                else:
+                    print(f"[AEGIS] {ticker} error: {e} — skipping")
 
     except Exception as e:
         print(f"[AEGIS] trail_positions error: {e}")
