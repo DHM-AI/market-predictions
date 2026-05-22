@@ -449,6 +449,7 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
 
                 results.append({
                     "ticker":           ticker,
+                    "side":             "long",
                     "qty":              qty,
                     "entry_price":      round(entry_price, 2),
                     "exit_price":       round(exit_price, 2),
@@ -490,6 +491,7 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
 
                 results.append({
                     "ticker":           ticker,
+                    "side":             "short",
                     "qty":              qty,
                     "entry_price":      round(entry_price, 2),
                     "exit_price":       round(exit_price, 2),

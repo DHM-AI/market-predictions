@@ -1218,6 +1218,16 @@ else:
     _net_c      = GREEN if _net >= 0 else RED
     _net_sign   = "+" if _net >= 0 else "-"
 
+    # Long / Short win rates
+    _longs      = [t for t in _alpaca_closed if t.get("side", "long") == "long"]
+    _shorts     = [t for t in _alpaca_closed if t.get("side") == "short"]
+    _l_wins     = sum(1 for t in _longs  if t["realized_pnl"] >= 0)
+    _s_wins     = sum(1 for t in _shorts if t["realized_pnl"] >= 0)
+    _l_wr       = f'{_l_wins/len(_longs)*100:.0f}%'  if _longs  else "—"
+    _s_wr       = f'{_s_wins/len(_shorts)*100:.0f}%' if _shorts else "—"
+    _l_label    = f'{_l_wr} <span style="font-size:9px;opacity:0.6;">({_l_wins}/{len(_longs)})</span>'
+    _s_label    = f'{_s_wr} <span style="font-size:9px;opacity:0.6;">({_s_wins}/{len(_shorts)})</span>'
+
     st.markdown(
         f'<div style="display:flex;gap:24px;align-items:center;padding:10px 16px;'
         f'background:rgba(0,180,255,0.04);border:1px solid rgba(0,180,255,0.1);'
@@ -1238,6 +1248,15 @@ else:
         f'text-transform:uppercase;color:{TEXT3};">Win Rate</span><br>'
         f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;'
         f'color:{AMBER};">{_wins/len(_alpaca_closed)*100:.0f}%</span></div>'
+        f'<div style="border-left:1px solid rgba(255,255,255,0.08);padding-left:20px;">'
+        f'<span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Long W/R</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;'
+        f'color:{GREEN};">{_l_label}</span></div>'
+        f'<div><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Short W/R</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;'
+        f'color:{RED};">{_s_label}</span></div>'
         f'</div>',
         unsafe_allow_html=True)
 
