@@ -895,24 +895,30 @@ def live_alpaca():
             else:
                 tp_pct_str = ""
 
+            # Locked profit — show on ANY position where stop is above entry (long)
+            # or below entry (short). Works for both trailing and fixed stops.
+            _lock_str = ""
+            if sl and entry:
+                _sl_f  = float(sl)
+                _ent_f = float(entry)
+                _qty_f = abs(float(p.get("qty", 0)))
+                if is_long and _sl_f > _ent_f:
+                    _locked_pp = (_sl_f - _ent_f) * _qty_f
+                    _lock_str = (
+                        f'<span style="display:block;font-size:10px;font-weight:700;'
+                        f'letter-spacing:0.4px;color:{GREEN};margin-top:2px;">'
+                        f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
+                    )
+                elif not is_long and _sl_f < _ent_f:
+                    _locked_pp = (_ent_f - _sl_f) * _qty_f
+                    _lock_str = (
+                        f'<span style="display:block;font-size:10px;font-weight:700;'
+                        f'letter-spacing:0.4px;color:{GREEN};margin-top:2px;">'
+                        f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
+                    )
+
             if is_trailing:
                 sl_val = f'${sl:.2f}' if sl else "tracking"
-                # Locked profit — only show when trailing stop is above entry (profit floor guaranteed)
-                _lock_str = ""
-                if sl and entry and float(sl) > float(entry) and is_long:
-                    _locked_pp = (float(sl) - float(entry)) * abs(float(p.get("qty", 0)))
-                    _lock_str = (
-                        f'<span style="display:block;font-size:10px;font-weight:700;'
-                        f'letter-spacing:0.4px;color:{GREEN};margin-top:2px;">'
-                        f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
-                    )
-                elif sl and entry and float(sl) < float(entry) and not is_long:
-                    _locked_pp = (float(entry) - float(sl)) * abs(float(p.get("qty", 0)))
-                    _lock_str = (
-                        f'<span style="display:block;font-size:10px;font-weight:700;'
-                        f'letter-spacing:0.4px;color:{GREEN};margin-top:2px;">'
-                        f'🔐 LOCKED +${_locked_pp:,.0f}</span>'
-                    )
                 sl_str = (
                     f'<span style="color:{AMBER};font-family:JetBrains Mono,monospace;'
                     f'font-size:13px;font-weight:700;">🔒 {sl_val}</span>{sl_pct_str}'
@@ -921,8 +927,11 @@ def live_alpaca():
                     + _lock_str
                 )
             elif sl:
-                sl_str = (f'<span style="color:{RED};font-family:JetBrains Mono,monospace;'
-                          f'font-size:13px;font-weight:600;">${sl:.2f}</span>{sl_pct_str}')
+                sl_str = (
+                    f'<span style="color:{RED};font-family:JetBrains Mono,monospace;'
+                    f'font-size:13px;font-weight:600;">${sl:.2f}</span>{sl_pct_str}'
+                    + _lock_str
+                )
             else:
                 sl_str = f'<span style="color:{TEXT3};">—</span>'
             tp_str = (
