@@ -570,7 +570,7 @@ def live_alpaca():
     acct      = {"portfolio_value": 0, "buying_power": 0, "cash": 0}
     positions = []
     try:
-        from execution.alpaca import get_account, get_positions
+        from execution.alpaca import get_account, get_positions, _get_client
         if alpaca_ok:
             acct      = get_account()
             positions = get_positions()
@@ -622,9 +622,20 @@ def live_alpaca():
 
     _tot_sign  = "+" if _total_today >= 0 else ""
 
-    # All-time P&L = portfolio vs starting bankroll
-    from config import BANKROLL as _BANKROLL
-    _alltime_pl    = portfolio - _BANKROLL
+    # All-time P&L = portfolio vs actual account starting equity (from Alpaca history)
+    # Cached in session state — only fetched once per session to avoid API overhead
+    if "account_start_equity" not in st.session_state:
+        try:
+            from alpaca.trading.requests import GetPortfolioHistoryRequest
+            _hist = _get_client().get_portfolio_history(
+                GetPortfolioHistoryRequest(period="1M", timeframe="1D"))
+            _equities = [e for e in (_hist.equity or []) if e and e > 0]
+            st.session_state["account_start_equity"] = _equities[0] if _equities else portfolio
+        except Exception:
+            st.session_state["account_start_equity"] = portfolio
+
+    _start_equity  = st.session_state["account_start_equity"]
+    _alltime_pl    = portfolio - _start_equity
     _alltime_color = GREEN if _alltime_pl > 0 else RED if _alltime_pl < 0 else TEXT2
     _alltime_sign  = "+" if _alltime_pl >= 0 else ""
 
@@ -636,7 +647,7 @@ def live_alpaca():
         + mc("Total P&L",
              f"{_alltime_sign}${abs(_alltime_pl):,.2f}", "Since account started",
              _alltime_color,
-             f"All-time profit vs starting bankroll of ${_BANKROLL:,.0f}.")
+             f"All-time profit vs starting equity of ${_start_equity:,.0f} (from Alpaca history).")
         + mc("P&L Today",
              f"{_tot_sign}${abs(_total_today):,.2f}", "Closed + open combined",
              _total_color,
