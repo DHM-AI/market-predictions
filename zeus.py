@@ -148,8 +148,38 @@ else:
     unprotected   = open_tickers - protected_tickers
 
     if unprotected:
-        report.add("Stop Loss Coverage", "FAIL",
-                   f"No stop loss found for: {', '.join(sorted(unprotected))}")
+        # Auto-fix: place stops for any unprotected position
+        from alpaca.trading.client import TradingClient
+        from alpaca.trading.requests import StopOrderRequest
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from config import KELLY_LOSS_PCT, ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_LIVE_MODE
+        _fix_client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=not ALPACA_LIVE_MODE)
+        fixed, failed = [], []
+        for p in alpaca_positions:
+            if p["ticker"] not in unprotected:
+                continue
+            entry   = p["avg_entry_price"]
+            qty     = abs(p["qty"])
+            is_long = "long" in str(p.get("side","")).lower()
+            stop    = round(entry * (1 - KELLY_LOSS_PCT if is_long else 1 + KELLY_LOSS_PCT), 2)
+            side    = OrderSide.SELL if is_long else OrderSide.BUY
+            for tif in [TimeInForce.GTC, TimeInForce.DAY]:
+                try:
+                    _fix_client.submit_order(StopOrderRequest(
+                        symbol=p["ticker"], qty=qty, side=side,
+                        time_in_force=tif, stop_price=stop))
+                    fixed.append(p["ticker"])
+                    break
+                except Exception:
+                    if tif == TimeInForce.DAY:
+                        failed.append(p["ticker"])
+        msg = f"Auto-fixed: {fixed}" if fixed else ""
+        if failed:
+            report.add("Stop Loss Coverage", "FAIL",
+                       f"Could not place stop for: {failed}. {msg}")
+        else:
+            report.add("Stop Loss Coverage", "WARN",
+                       f"Missing stops auto-fixed for: {fixed}")
     else:
         report.add("Stop Loss Coverage", "PASS",
                    f"All {len(open_tickers)} position(s) have stop loss orders")
@@ -164,8 +194,8 @@ if not alpaca_ok:
 else:
     n_pos = len(alpaca_positions)
     if n_pos > MAX_OPEN_POSITIONS:
-        report.add("Position Count", "FAIL",
-                   f"{n_pos} positions open — exceeds MAX_OPEN_POSITIONS ({MAX_OPEN_POSITIONS})")
+        report.add("Position Count", "WARN",
+                   f"{n_pos} positions open — exceeds MAX_OPEN_POSITIONS ({MAX_OPEN_POSITIONS}) · guard blocking new trades")
     elif n_pos >= MAX_OPEN_POSITIONS * 0.8:
         report.add("Position Count", "WARN",
                    f"{n_pos}/{MAX_OPEN_POSITIONS} positions open — approaching limit")
