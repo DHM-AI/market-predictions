@@ -30,7 +30,8 @@ def _build_prompt(row: dict) -> str:
     )
 
 
-def explain_picks(scored_df, top_n: int = TOP_N_CLAUDE_ANALYSIS) -> dict[str, str]:
+def explain_picks(scored_df, top_n: int = TOP_N_CLAUDE_ANALYSIS,
+                  oracle_directive: str = "") -> dict[str, str]:
     """
     Returns {ticker: markdown_explanation} for the top N picks.
     Uses non-streaming for batch processing (email/logging).
@@ -44,6 +45,8 @@ def explain_picks(scored_df, top_n: int = TOP_N_CLAUDE_ANALYSIS) -> dict[str, st
     for _, row in top.iterrows():
         ticker = row["ticker"]
         prompt = _build_prompt(row.to_dict())
+        if oracle_directive:
+            prompt = f"ORACLE system directive for today: {oracle_directive}\n\n" + prompt
         try:
             message = _get_client().messages.create(
                 model="claude-sonnet-4-6",

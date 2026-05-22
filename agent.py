@@ -97,7 +97,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         portfolio_value = BANKROLL
 
     results    = []
-    auto_picks = picks_df[picks_df["score"] >= AUTO_EXECUTE_MIN_SCORE]
+    auto_picks = picks_df[picks_df["score"] >= _effective_min_score]
     for _, row in auto_picks.iterrows():
         ticker    = row["ticker"]
         direction = row.get("direction", "bullish")
@@ -164,6 +164,12 @@ def run_scan(send_email: bool = True,
     except Exception as e:
         print(f"[ORACLE] Could not load directives: {e}")
 
+    # Apply ORACLE threshold adjustment
+    from config import AUTO_EXECUTE_MIN_SCORE as _BASE_MIN_SCORE
+    _effective_min_score = _BASE_MIN_SCORE + int(oracle_directives.get("confidence_threshold_adjust", 0))
+    if _effective_min_score != _BASE_MIN_SCORE:
+        print(f"[ORACLE] Adjusted auto-execute threshold: {_BASE_MIN_SCORE} → {_effective_min_score}")
+
     # ── 0. Market Regime ─────────────────────────────────────────
     print(f"[0/5] REGIME — VIX + SPY trend + sector breadth")
     _neutral_regime = {"regime":"neutral","vix":20.0,"vix_level":"normal",
@@ -223,6 +229,14 @@ def run_scan(send_email: bool = True,
 
     print(f"      {len(picks_df)} setups flagged (score ≥ {MIN_SCORE_TO_ALERT})")
 
+    # ORACLE direction bias — boost favored direction picks
+    _favor = oracle_directives.get("favor_directions", "")
+    if _favor in ("bullish", "bearish") and not picks_df.empty:
+        mask = picks_df["direction"] == _favor
+        picks_df.loc[mask, "score"] = (picks_df.loc[mask, "score"] + 3).clip(upper=100)
+        picks_df.loc[~mask & (picks_df["direction"] != "mixed"), "score"] = (picks_df.loc[~mask & (picks_df["direction"] != "mixed"), "score"] - 2).clip(lower=0)
+        print(f"[ORACLE] Score bias applied — favoring {_favor}")
+
     # ── 3.5. Enrich top picks with options flow ───────────────────
     if ENABLE_OPTIONS_FLOW and not picks_df.empty:
         top_picks = picks_df[picks_df["score"] >= 60].head(15)
@@ -250,7 +264,8 @@ def run_scan(send_email: bool = True,
 
     # Claude explanations
     print(f"\n      Generating Claude analysis for top {TOP_N_CLAUDE_ANALYSIS}...")
-    explanations = explain_picks(picks_df, top_n=TOP_N_CLAUDE_ANALYSIS)
+    explanations = explain_picks(picks_df, top_n=TOP_N_CLAUDE_ANALYSIS,
+                                 oracle_directive=oracle_directives.get("scanner_directive", ""))
 
     # ── 5. Learn — persist + optionally execute ───────────────────
     print(f"\n[5/5] LEARN — persist predictions")

@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 import math
 
-st.set_page_config(page_title="Market Scanner", page_icon="⚡", layout="wide",
+st.set_page_config(page_title="Illuminati", page_icon="🔺", layout="wide",
                    initial_sidebar_state="collapsed")
 
 BG    = "#03060d"
@@ -371,7 +371,7 @@ with hc1:
     )
     st.markdown(
         f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">'
-        f'<span style="font-size:18px;font-weight:700;color:{TEXT};">⚡ Market Intelligence Dashboard</span>'
+        f'<span style="font-size:18px;font-weight:700;color:{TEXT};">🔺 ILLUMINATI</span>'
         f'<span class="live-pill"><span class="live-dot"></span>LIVE</span>'
         f'{mode_badge}'
         f'<span style="font-size:11px;color:{TEXT3};">Last scan: {last_scan if last_scan else "pending"} &nbsp;·&nbsp; {datetime.today().strftime("%b %d %Y")}</span>'

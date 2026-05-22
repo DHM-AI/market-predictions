@@ -143,7 +143,7 @@ def send_daily_digest(picks_df, explanations: dict) -> bool:
             "title":       ticker,
             "title_link":  f"https://finance.yahoo.com/quote/{ticker}",
             "fields":      fields,
-            "footer":      "Market Intelligence",
+            "footer":      "Illuminati",
             "ts":          int(datetime.now().timestamp()),
         })
 
@@ -188,7 +188,7 @@ def send_health_report(report) -> bool:
                 "title":    header,
                 "text":     f"_{summary}_\n\n{checks_text}",
                 "mrkdwn_in": ["pretext", "text"],
-                "footer":   "Market Intelligence · Health Check Agent",
+                "footer":   "Illuminati · Health Check Agent",
                 "ts":       int(datetime.now().timestamp()),
             }
         ]
@@ -250,7 +250,7 @@ def send_trade_alert(result: dict) -> bool:
         fields.append({"title": "Reason",      "value": reason[:200],     "short": False})
 
     order_id = result.get("order_id", "")
-    footer   = f"Order {order_id}" if order_id else "Market Intelligence"
+    footer   = f"Order {order_id}" if order_id else "Illuminati"
 
     payload = {
         "attachments": [
@@ -279,7 +279,7 @@ def send_test_message() -> bool:
     """Send a test ping to verify the webhook is working."""
     return _post({
         "text": (
-            "🤖 *Market Intelligence — Slack webhook connected!*\n"
+            "🤖 *Illuminati — Slack webhook connected!*\n"
             "You'll receive:\n"
             "• 📊 Trade picks after each of the 7 daily scans\n"
             "• 🩺 Health check reports (weekdays 5PM + Sunday 11AM ET)\n"
