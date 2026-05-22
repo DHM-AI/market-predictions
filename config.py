@@ -132,6 +132,15 @@ TRAIL_TIGHTEN_LEVELS = [
 COOLDOWN_WIN_THRESHOLD = 0.05   # block counter-signal if prior close was +5%+
 COOLDOWN_HOURS         = 24     # hours to block counter-direction trades
 
+# ── Partial Exit (Scale-Out) ───────────────────────────────────────────────────
+# At PARTIAL_EXIT_TRIGGER_PCT gain: close PARTIAL_EXIT_FRACTION of the position,
+# move remaining stop to breakeven. Remaining half rides with AEGIS trailing.
+# Set ENABLE_PARTIAL_EXIT = False to revert to single-exit mode instantly.
+ENABLE_PARTIAL_EXIT      = True
+PARTIAL_EXIT_TRIGGER_PCT = 0.07   # fire at +7% gain (first tighten level)
+PARTIAL_EXIT_FRACTION    = 0.50   # close 50%, let 50% ride
+PARTIAL_EXIT_MOVE_TO_BE  = True   # move remaining stop to breakeven after exit
+
 # ── Auto-execution threshold ──────────────────────────────────────────────────
 # Only auto-execute if score >= this AND Alpaca is configured
 AUTO_EXECUTE_MIN_SCORE = 70

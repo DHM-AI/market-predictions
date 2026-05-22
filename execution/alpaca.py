@@ -637,12 +637,21 @@ def trail_positions(
       2. Leave the take-profit limit order untouched
       3. Place an Alpaca native trailing stop (GTC) at trail_pct below peak
 
+    Partial exit (scale-out) — if ENABLE_PARTIAL_EXIT is True:
+      When a position first hits PARTIAL_EXIT_TRIGGER_PCT (+7% default):
+        - Close PARTIAL_EXIT_FRACTION (50%) at market
+        - Move remaining stop to breakeven (entry price)
+        - Log to Supabase so it never fires twice for the same position
+        - Next AEGIS run applies trailing stop to the remaining half
+
     Already-trailing positions are detected by order type and skipped,
     so this is safe to call repeatedly.
 
     Returns a list of dicts for positions that were upgraded to trailing.
     """
-    from config import TRAIL_TRIGGER_PCT, TRAIL_PCT, TRAIL_TIGHTEN_LEVELS
+    from config import (TRAIL_TRIGGER_PCT, TRAIL_PCT, TRAIL_TIGHTEN_LEVELS,
+                        ENABLE_PARTIAL_EXIT, PARTIAL_EXIT_TRIGGER_PCT,
+                        PARTIAL_EXIT_FRACTION, PARTIAL_EXIT_MOVE_TO_BE)
 
     trigger = trigger_pct if trigger_pct is not None else TRAIL_TRIGGER_PCT
     trail   = trail_pct   if trail_pct   is not None else TRAIL_PCT
@@ -657,10 +666,22 @@ def trail_positions(
     if not is_configured():
         return []
 
+    # Load tickers that already had a partial exit — persisted in Supabase
+    # so it survives across GitHub Actions runs (ephemeral environment).
+    already_partially_exited: set = set()
+    if ENABLE_PARTIAL_EXIT:
+        try:
+            from db import get_partial_exit_tickers
+            already_partially_exited = get_partial_exit_tickers()
+        except Exception as _dbe:
+            print(f"[AEGIS] Could not load partial exit history: {_dbe}")
+
     results = []
     try:
         from alpaca.trading.requests import (GetOrdersRequest,
-                                              TrailingStopOrderRequest)
+                                              TrailingStopOrderRequest,
+                                              MarketOrderRequest,
+                                              StopOrderRequest)
         from alpaca.trading.enums import (QueryOrderStatus, OrderSide,
                                           TimeInForce)
 
@@ -683,18 +704,128 @@ def trail_positions(
             raw_side = str(p.get("side", "")).lower()
             is_long  = "long" in raw_side or "buy" in raw_side
 
-            # Only handle longs for now; shorts need inverted logic
+            ticker_orders = orders_by_ticker.get(ticker, [])
+            pct_gain_decimal = pct_gain / 100.0
+
+            # ── Partial exit (scale-out) ──────────────────────────────────────
+            # Fires ONCE per position when gain hits PARTIAL_EXIT_TRIGGER_PCT.
+            # Closes 50% at market, moves remaining stop to breakeven.
+            # Logged to Supabase so it survives GitHub Actions restarts.
+            if (ENABLE_PARTIAL_EXIT
+                    and ticker not in already_partially_exited
+                    and pct_gain_decimal >= PARTIAL_EXIT_TRIGGER_PCT):
+                try:
+                    abs_qty     = abs(float(qty))
+                    close_qty   = round(abs_qty * PARTIAL_EXIT_FRACTION, 4)
+                    remain_qty  = round(abs_qty - close_qty, 4)
+                    exit_side   = OrderSide.SELL if is_long else OrderSide.BUY
+                    entry_px    = float(p.get("avg_entry_price", 0))
+                    current_px  = float(p.get("current_price", 0))
+
+                    # Close partial position at market
+                    mreq = MarketOrderRequest(
+                        symbol        = ticker,
+                        qty           = close_qty,
+                        side          = exit_side,
+                        time_in_force = TimeInForce.DAY,
+                    )
+                    close_order = client.submit_order(mreq)
+
+                    # Cancel all existing stop orders (sized for full qty)
+                    for o in ticker_orders:
+                        otype   = str(getattr(o, "type", "")).lower()
+                        ostatus = str(getattr(o, "status", "")).lower()
+                        if "stop" in otype and ostatus in (
+                                "orderstatus.open", "orderstatus.new",
+                                "orderstatus.held", "open", "new", "held",
+                                "pending_new"):
+                            try:
+                                client.cancel_order_by_id(str(o.id))
+                            except Exception:
+                                pass
+
+                    # Move remaining stop to breakeven (entry price)
+                    if PARTIAL_EXIT_MOVE_TO_BE and remain_qty > 0 and entry_px > 0:
+                        be_side = OrderSide.SELL if is_long else OrderSide.BUY
+                        be_req  = StopOrderRequest(
+                            symbol      = ticker,
+                            qty         = remain_qty,
+                            side        = be_side,
+                            stop_price  = round(entry_px, 2),
+                            time_in_force = TimeInForce.GTC,
+                        )
+                        try:
+                            client.submit_order(be_req)
+                        except Exception:
+                            # Fractional share → DAY order only
+                            be_req.time_in_force = TimeInForce.DAY
+                            client.submit_order(be_req)
+
+                    # Log to Supabase (persists across runs — prevents double-fire)
+                    try:
+                        from db import save_trade
+                        save_trade({
+                            "order_id":     str(close_order.id),
+                            "ticker":       ticker,
+                            "side":         "sell_partial" if is_long else "buy_partial",
+                            "dollar_amount": round(close_qty * current_px, 2),
+                            "mode":         "LIVE" if is_live_mode() else "PAPER",
+                            "status":       "partial_exit",
+                            "reason":       (f"Scale-out {PARTIAL_EXIT_FRACTION*100:.0f}% "
+                                             f"at +{pct_gain:.1f}% gain"),
+                            "timestamp":    datetime.now().isoformat(),
+                        })
+                    except Exception as dbe:
+                        print(f"[AEGIS] Could not log partial exit to DB: {dbe}")
+
+                    already_partially_exited.add(ticker)
+
+                    pnl_locked = round(close_qty * (current_px - entry_px)
+                                       * (1 if is_long else -1), 2)
+                    mode_tag   = "LIVE" if is_live_mode() else "PAPER"
+                    print(f"[AEGIS] [{mode_tag}] ✂️ PARTIAL EXIT {ticker}: "
+                          f"closed {close_qty} shares at +{pct_gain:.1f}% "
+                          f"(locked ${pnl_locked:+.2f}), "
+                          f"remaining {remain_qty} shares → stop @ breakeven ${entry_px:.2f}")
+
+                    try:
+                        from alerts.slack import _post
+                        _post({"text": (
+                            f"✂️ *Partial exit — {ticker}* (+{pct_gain:.1f}%)\n"
+                            f">Closed *{PARTIAL_EXIT_FRACTION*100:.0f}%* "
+                            f"({close_qty} shares) · locked in *${pnl_locked:+.2f}*\n"
+                            f">Remaining *{remain_qty} shares* — stop moved to "
+                            f"breakeven (${entry_px:.2f})\n"
+                            f">AEGIS will tighten trail on remaining half next run"
+                        )})
+                    except Exception:
+                        pass
+
+                    results.append({
+                        "ticker":        ticker,
+                        "action":        "partial_exit",
+                        "pct_gain":      round(pct_gain, 2),
+                        "qty_closed":    close_qty,
+                        "qty_remaining": remain_qty,
+                        "pnl_locked":    pnl_locked,
+                        "order_id":      str(close_order.id),
+                        "timestamp":     datetime.now().isoformat(),
+                    })
+                    continue  # remaining half gets trailing stop on NEXT AEGIS run
+
+                except Exception as pe:
+                    print(f"[AEGIS] Partial exit failed for {ticker}: {pe}")
+                    # Fall through to regular trailing stop logic
+            # ── End partial exit ──────────────────────────────────────────────
+
+            # Only handle longs for trailing stop (shorts need inverted logic)
             if not is_long:
                 continue
 
-            # Not profitable enough yet
+            # Not profitable enough yet for trailing stop
             if pct_gain < trigger * 100:
                 continue
 
-            ticker_orders = orders_by_ticker.get(ticker, [])
-
-            # Determine target trail % for this gain level
-            pct_gain_decimal = pct_gain / 100.0
             target_trail = _target_trail(pct_gain_decimal)
 
             # Check for existing trailing stop

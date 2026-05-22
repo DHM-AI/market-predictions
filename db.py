@@ -203,3 +203,26 @@ def save_trade(record: dict) -> None:
 def load_trades() -> list[dict]:
     result = _client().table("trades").select("*").order("timestamp", desc=True).execute()
     return result.data or []
+
+
+def get_partial_exit_tickers(lookback_days: int = 90) -> set:
+    """
+    Return the set of tickers that have already had a scale-out partial exit
+    within the lookback window. Used by AEGIS to avoid firing twice per position.
+
+    A lookback of 90 days covers any realistic swing trade duration.
+    If a position closes and a new one opens in the same ticker within 90 days,
+    the partial exit won't fire again — acceptable V1 edge case.
+    """
+    try:
+        cutoff = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat()
+        result = (
+            _client().table("trades")
+            .select("ticker")
+            .eq("status", "partial_exit")
+            .gte("timestamp", cutoff)
+            .execute()
+        )
+        return {r["ticker"] for r in (result.data or [])}
+    except Exception:
+        return set()
