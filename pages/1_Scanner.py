@@ -695,7 +695,7 @@ def live_alpaca():
     _rt_sign  = "+" if _realized_alltime >= 0 else ""
 
     st.markdown(
-        f'<div class="metrics-row" style="grid-template-columns:repeat(9,1fr);">'
+        f'<div class="metrics-row" style="grid-template-columns:repeat(8,1fr);">'
         + mc("Portfolio Value",
              f"${portfolio:,.0f}", "Total equity",
              GLOW, "Total Alpaca account value — cash + open positions.")
@@ -725,13 +725,10 @@ def live_alpaca():
              f"{len(positions)} position{'s' if len(positions) != 1 else ''} live",
              _ul_color,
              "Sum of position.unrealized_pl direct from Alpaca positions endpoint.")
-        + mc("Buying Power",
-             f"${buying_power:,.0f}", "Available now",
-             TEXT, "Cash available for new positions right now.")
         + mc("AI Setups Today",
-             str(_n_picks) if _n_picks else "—", "Score ≥ 50",
-             GREEN if _n_picks else TEXT2,
-             "Tickers flagged today. Agent scans 12× daily.")
+             str(_n_auto) if _n_auto else "—", "Score ≥ 70 · auto-execute",
+             GREEN if _n_auto else TEXT2,
+             "High-confidence picks (score ≥ 70) — the threshold for automatic execution by APEX.")
         + mc("Market Clock",
              _market_clock(), _market_status(),
              GREEN if _is_market_open() else RED,
