@@ -709,7 +709,8 @@ def live_alpaca():
              "Total P&L minus current open unrealized = real money locked in from every closed trade since the account started. Pure Alpaca, no fill matching.")
         + mc("P&L Today",
              f"{_tot_sign}${abs(_total_today):,.2f}",
-             (f'{_tot_sign}{abs(_total_today_pct):.2f}% · '
+             (f'{_tot_sign}{abs(_total_today_pct):.2f}%'
+              f'<br>'
               f'<span style="color:{GREEN};font-weight:700;">W +${_today_wins_sum:,.0f}</span> '
               f'<span style="color:{TEXT3};">({_today_wins_n})</span> · '
               f'<span style="color:{RED};font-weight:700;">L -${abs(_today_losses_sum):,.0f}</span> '
