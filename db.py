@@ -205,24 +205,45 @@ def load_trades() -> list[dict]:
     return result.data or []
 
 
-def get_partial_exit_tickers(lookback_days: int = 90) -> set:
+def get_partial_exit_history(lookback_days: int = 90) -> dict:
     """
-    Return the set of tickers that have already had a scale-out partial exit
-    within the lookback window. Used by AEGIS to avoid firing twice per position.
+    Return {ticker: {'t1': bool, 't2': bool, 't1_qty': float}} for tickers that
+    have had partial exits within the lookback window.
 
-    A lookback of 90 days covers any realistic swing trade duration.
-    If a position closes and a new one opens in the same ticker within 90 days,
-    the partial exit won't fire again — acceptable V1 edge case.
+    Used by AEGIS to know which tiers have already fired per ticker so it
+    doesn't double-fire. 't1_qty' is the qty closed in Tier 1 — Tier 2 closes
+    the same qty (=33% of the original position).
     """
+    history: dict = {}
     try:
         cutoff = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat()
         result = (
             _client().table("trades")
-            .select("ticker")
-            .eq("status", "partial_exit")
+            .select("ticker, status, dollar_amount, reason, timestamp")
+            .in_("status", ["partial_exit", "partial_exit_t1", "partial_exit_t2"])
             .gte("timestamp", cutoff)
             .execute()
         )
-        return {r["ticker"] for r in (result.data or [])}
+        for r in (result.data or []):
+            tk = r["ticker"]
+            st = r["status"]
+            history.setdefault(tk, {"t1": False, "t2": False, "t1_qty": 0.0})
+            # Legacy "partial_exit" entries count as Tier 1 fired
+            if st in ("partial_exit", "partial_exit_t1"):
+                history[tk]["t1"] = True
+                # Try to extract qty from reason field (format: "... qty=X ...")
+                import re as _re
+                m = _re.search(r"qty=([\d.]+)", str(r.get("reason", "")))
+                if m:
+                    history[tk]["t1_qty"] = float(m.group(1))
+            elif st == "partial_exit_t2":
+                history[tk]["t2"] = True
     except Exception:
-        return set()
+        pass
+    return history
+
+
+def get_partial_exit_tickers(lookback_days: int = 90) -> set:
+    """Backward-compat: just the set of tickers with Tier 1 already fired."""
+    hist = get_partial_exit_history(lookback_days)
+    return {tk for tk, info in hist.items() if info.get("t1")}

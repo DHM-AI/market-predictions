@@ -132,14 +132,28 @@ TRAIL_TIGHTEN_LEVELS = [
 COOLDOWN_WIN_THRESHOLD = 0.05   # block counter-signal if prior close was +5%+
 COOLDOWN_HOURS         = 24     # hours to block counter-direction trades
 
-# ── Partial Exit (Scale-Out) ───────────────────────────────────────────────────
-# At PARTIAL_EXIT_TRIGGER_PCT gain: close PARTIAL_EXIT_FRACTION of the position,
-# move remaining stop to breakeven. Remaining half rides with AEGIS trailing.
+# ── Partial Exit (Two-Tier Scale-Out) ─────────────────────────────────────────
+# THREE-STAGE EXIT STRATEGY:
+#   Tier 1 at +7%:  close 33% of ORIGINAL position, move stop to breakeven
+#   Tier 2 at +12%: close another 33% of ORIGINAL position (same qty as Tier 1)
+#   Remaining 34%:  rides with multi-level AEGIS trailing stop (catches runners)
+#
+# Designed around observed performance: many winners run from +7% to +12-17%,
+# scaling out in stages locks in profit progressively while keeping upside.
+#
 # Set ENABLE_PARTIAL_EXIT = False to revert to single-exit mode instantly.
-ENABLE_PARTIAL_EXIT      = True
-PARTIAL_EXIT_TRIGGER_PCT = 0.07   # fire at +7% gain (first tighten level)
-PARTIAL_EXIT_FRACTION    = 0.50   # close 50%, let 50% ride
-PARTIAL_EXIT_MOVE_TO_BE  = True   # move remaining stop to breakeven after exit
+ENABLE_PARTIAL_EXIT          = True
+
+PARTIAL_EXIT_TIER1_TRIGGER   = 0.07   # fire Tier 1 at +7% gain
+PARTIAL_EXIT_TIER1_FRACTION  = 0.33   # close 33% of original position
+PARTIAL_EXIT_MOVE_TO_BE      = True   # move remaining stop to breakeven after T1
+
+PARTIAL_EXIT_TIER2_TRIGGER   = 0.12   # fire Tier 2 at +12% gain
+PARTIAL_EXIT_TIER2_FRACTION  = 0.33   # close another 33% (= same qty as T1)
+
+# Legacy aliases — keep existing callers working
+PARTIAL_EXIT_TRIGGER_PCT = PARTIAL_EXIT_TIER1_TRIGGER
+PARTIAL_EXIT_FRACTION    = PARTIAL_EXIT_TIER1_FRACTION
 
 # ── Auto-execution threshold ──────────────────────────────────────────────────
 # Only auto-execute if score >= this AND Alpaca is configured

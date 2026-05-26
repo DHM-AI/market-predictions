@@ -680,12 +680,11 @@ def trail_positions(
       2. Leave the take-profit limit order untouched
       3. Place an Alpaca native trailing stop (GTC) at trail_pct below peak
 
-    Partial exit (scale-out) — if ENABLE_PARTIAL_EXIT is True:
-      When a position first hits PARTIAL_EXIT_TRIGGER_PCT (+7% default):
-        - Close PARTIAL_EXIT_FRACTION (50%) at market
-        - Move remaining stop to breakeven (entry price)
-        - Log to Supabase so it never fires twice for the same position
-        - Next AEGIS run applies trailing stop to the remaining half
+    Partial exit (two-tier scale-out) — if ENABLE_PARTIAL_EXIT is True:
+      Tier 1 at +7%:  close 33% of original, move stop to breakeven
+      Tier 2 at +12%: close another 33% (same qty as T1, = 33% of original)
+      Remaining 34%:  rides with AEGIS trailing stop
+      Each tier logged to Supabase so it never fires twice per position.
 
     Already-trailing positions are detected by order type and skipped,
     so this is safe to call repeatedly.
@@ -693,8 +692,9 @@ def trail_positions(
     Returns a list of dicts for positions that were upgraded to trailing.
     """
     from config import (TRAIL_TRIGGER_PCT, TRAIL_PCT, TRAIL_TIGHTEN_LEVELS,
-                        ENABLE_PARTIAL_EXIT, PARTIAL_EXIT_TRIGGER_PCT,
-                        PARTIAL_EXIT_FRACTION, PARTIAL_EXIT_MOVE_TO_BE)
+                        ENABLE_PARTIAL_EXIT, PARTIAL_EXIT_MOVE_TO_BE,
+                        PARTIAL_EXIT_TIER1_TRIGGER, PARTIAL_EXIT_TIER1_FRACTION,
+                        PARTIAL_EXIT_TIER2_TRIGGER, PARTIAL_EXIT_TIER2_FRACTION)
 
     trigger = trigger_pct if trigger_pct is not None else TRAIL_TRIGGER_PCT
     trail   = trail_pct   if trail_pct   is not None else TRAIL_PCT
@@ -709,13 +709,13 @@ def trail_positions(
     if not is_configured():
         return []
 
-    # Load tickers that already had a partial exit — persisted in Supabase
-    # so it survives across GitHub Actions runs (ephemeral environment).
-    already_partially_exited: set = set()
+    # Load partial exit history per ticker — {ticker: {t1, t2, t1_qty}}
+    # Persisted in Supabase so it survives GitHub Actions restarts.
+    partial_history: dict = {}
     if ENABLE_PARTIAL_EXIT:
         try:
-            from db import get_partial_exit_tickers
-            already_partially_exited = get_partial_exit_tickers()
+            from db import get_partial_exit_history
+            partial_history = get_partial_exit_history()
         except Exception as _dbe:
             print(f"[AEGIS] Could not load partial exit history: {_dbe}")
 
@@ -761,23 +761,38 @@ def trail_positions(
             ticker_orders = orders_by_ticker.get(ticker, [])
             pct_gain_decimal = pct_gain / 100.0
 
-            # ── Partial exit (scale-out) ──────────────────────────────────────
-            # Fires ONCE per position when gain hits PARTIAL_EXIT_TRIGGER_PCT.
-            # Closes 50% at market, moves remaining stop to breakeven.
-            # Logged to Supabase so it survives GitHub Actions restarts.
-            if (ENABLE_PARTIAL_EXIT
-                    and ticker not in already_partially_exited
-                    and pct_gain_decimal >= PARTIAL_EXIT_TRIGGER_PCT):
-                try:
-                    abs_qty     = abs(float(qty))
-                    close_qty   = round(abs_qty * PARTIAL_EXIT_FRACTION, 4)
-                    remain_qty  = round(abs_qty - close_qty, 4)
-                    exit_side   = OrderSide.SELL if is_long else OrderSide.BUY
-                    entry_px    = float(p.get("avg_entry_price", 0))
-                    current_px  = float(p.get("current_price", 0))
+            # ── Two-tier partial exit (scale-out) ─────────────────────────────
+            # Tier 1 at +7%:  close 33% of ORIGINAL, move stop to breakeven
+            # Tier 2 at +12%: close another 33% (= same qty as T1, so 66% closed)
+            # Remaining 34%:  rides with multi-level trailing stop
+            if ENABLE_PARTIAL_EXIT:
+                _hist = partial_history.get(ticker, {"t1": False, "t2": False, "t1_qty": 0.0})
+                _abs_qty   = abs(float(qty))
+                _entry_px  = float(p.get("avg_entry_price", 0))
+                _current_px = float(p.get("current_price", 0))
 
-                    # Cancel existing stops FIRST — shares held for stop orders
-                    # cannot be sold until those orders are released.
+                def _fire_tier(tier_name: str, fraction_to_close: float,
+                               trigger_pct: float, move_to_be: bool):
+                    """Inner helper — fire one partial exit tier."""
+                    nonlocal _abs_qty
+                    # qty to close = 33% of ORIGINAL position
+                    # For T1: original = current (=_abs_qty)
+                    # For T2: original = current / (1 - T1_FRACTION) ≈ current / 0.67
+                    if tier_name == "t1":
+                        close_qty = round(_abs_qty * fraction_to_close, 4)
+                    else:
+                        # T2: same qty as T1 (record from history)
+                        close_qty = _hist.get("t1_qty", 0)
+                        if close_qty <= 0:
+                            # Fallback if T1 qty unknown — use 33% of current
+                            close_qty = round(_abs_qty * fraction_to_close, 4)
+                        close_qty = min(close_qty, _abs_qty)  # don't oversell
+                    if close_qty <= 0:
+                        return None
+                    remain_qty = round(_abs_qty - close_qty, 4)
+                    exit_side  = OrderSide.SELL if is_long else OrderSide.BUY
+
+                    # Cancel existing stops first (release held shares)
                     for o in ticker_orders:
                         otype   = str(getattr(o, "type", "")).lower()
                         ostatus = str(getattr(o, "status", "")).lower()
@@ -790,87 +805,108 @@ def trail_positions(
                             except Exception:
                                 pass
 
-                    # Close partial position at market (shares now free)
+                    # Market-close the tier qty
                     mreq = MarketOrderRequest(
-                        symbol        = ticker,
-                        qty           = close_qty,
-                        side          = exit_side,
-                        time_in_force = TimeInForce.DAY,
+                        symbol=ticker, qty=close_qty, side=exit_side,
+                        time_in_force=TimeInForce.DAY,
                     )
                     close_order = client.submit_order(mreq)
 
-                    # Move remaining stop to breakeven (entry price)
-                    if PARTIAL_EXIT_MOVE_TO_BE and remain_qty > 0 and entry_px > 0:
+                    # T1 moves remaining stop to breakeven
+                    # T2 leaves stop at breakeven (already there from T1)
+                    if move_to_be and remain_qty > 0 and _entry_px > 0:
                         be_side = OrderSide.SELL if is_long else OrderSide.BUY
-                        be_req  = StopOrderRequest(
-                            symbol      = ticker,
-                            qty         = remain_qty,
-                            side        = be_side,
-                            stop_price  = round(entry_px, 2),
-                            time_in_force = TimeInForce.GTC,
+                        be_req = StopOrderRequest(
+                            symbol=ticker, qty=remain_qty, side=be_side,
+                            stop_price=round(_entry_px, 2),
+                            time_in_force=TimeInForce.GTC,
                         )
                         try:
                             client.submit_order(be_req)
                         except Exception:
-                            # Fractional share → DAY order only
                             be_req.time_in_force = TimeInForce.DAY
                             client.submit_order(be_req)
 
-                    # Log to Supabase (persists across runs — prevents double-fire)
+                    # Log to Supabase — status encodes which tier fired
                     try:
                         from db import save_trade
                         save_trade({
                             "order_id":     str(close_order.id),
                             "ticker":       ticker,
                             "side":         "sell_partial" if is_long else "buy_partial",
-                            "dollar_amount": round(close_qty * current_px, 2),
+                            "dollar_amount": round(close_qty * _current_px, 2),
                             "mode":         "LIVE" if is_live_mode() else "PAPER",
-                            "status":       "partial_exit",
-                            "reason":       (f"Scale-out {PARTIAL_EXIT_FRACTION*100:.0f}% "
-                                             f"at +{pct_gain:.1f}% gain"),
+                            "status":       f"partial_exit_{tier_name}",
+                            "reason":       (f"Tier-{tier_name.upper()[1]} scale-out "
+                                             f"{fraction_to_close*100:.0f}% at +{pct_gain:.1f}% "
+                                             f"gain qty={close_qty}"),
                             "timestamp":    datetime.now().isoformat(),
                         })
                     except Exception as dbe:
-                        print(f"[AEGIS] Could not log partial exit to DB: {dbe}")
+                        print(f"[AEGIS] Could not log {tier_name} to DB: {dbe}")
 
-                    already_partially_exited.add(ticker)
-
-                    pnl_locked = round(close_qty * (current_px - entry_px)
+                    pnl_locked = round(close_qty * (_current_px - _entry_px)
                                        * (1 if is_long else -1), 2)
                     mode_tag   = "LIVE" if is_live_mode() else "PAPER"
-                    print(f"[AEGIS] [{mode_tag}] ✂️ PARTIAL EXIT {ticker}: "
+                    tier_lbl   = "T1" if tier_name == "t1" else "T2"
+                    print(f"[AEGIS] [{mode_tag}] ✂️ PARTIAL EXIT {tier_lbl} {ticker}: "
                           f"closed {close_qty} shares at +{pct_gain:.1f}% "
-                          f"(locked ${pnl_locked:+.2f}), "
-                          f"remaining {remain_qty} shares → stop @ breakeven ${entry_px:.2f}")
+                          f"(locked ${pnl_locked:+.2f}), remaining {remain_qty} shares")
 
                     try:
                         from alerts.slack import _post
+                        be_note = f" · stop → breakeven (${_entry_px:.2f})" if move_to_be else ""
                         _post({"text": (
-                            f"✂️ *Partial exit — {ticker}* (+{pct_gain:.1f}%)\n"
-                            f">Closed *{PARTIAL_EXIT_FRACTION*100:.0f}%* "
+                            f"✂️ *Partial exit {tier_lbl} — {ticker}* (+{pct_gain:.1f}%)\n"
+                            f">Closed *{fraction_to_close*100:.0f}%* "
                             f"({close_qty} shares) · locked in *${pnl_locked:+.2f}*\n"
-                            f">Remaining *{remain_qty} shares* — stop moved to "
-                            f"breakeven (${entry_px:.2f})\n"
-                            f">AEGIS will tighten trail on remaining half next run"
+                            f">Remaining *{remain_qty} shares*{be_note}"
                         )})
                     except Exception:
                         pass
 
-                    results.append({
-                        "ticker":        ticker,
-                        "action":        "partial_exit",
-                        "pct_gain":      round(pct_gain, 2),
-                        "qty_closed":    close_qty,
-                        "qty_remaining": remain_qty,
-                        "pnl_locked":    pnl_locked,
-                        "order_id":      str(close_order.id),
-                        "timestamp":     datetime.now().isoformat(),
-                    })
-                    continue  # remaining half gets trailing stop on NEXT AEGIS run
+                    _hist[tier_name] = True
+                    if tier_name == "t1":
+                        _hist["t1_qty"] = close_qty
+                    partial_history[ticker] = _hist
+                    _abs_qty = remain_qty  # update for any subsequent tier this run
 
-                except Exception as pe:
-                    print(f"[AEGIS] Partial exit failed for {ticker}: {pe}")
-                    # Fall through to regular trailing stop logic
+                    return {
+                        "ticker": ticker, "action": f"partial_exit_{tier_name}",
+                        "pct_gain": round(pct_gain, 2), "qty_closed": close_qty,
+                        "qty_remaining": remain_qty, "pnl_locked": pnl_locked,
+                        "order_id": str(close_order.id),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+
+                fired_any = False
+                # Tier 1
+                if not _hist["t1"] and pct_gain_decimal >= PARTIAL_EXIT_TIER1_TRIGGER:
+                    try:
+                        r = _fire_tier("t1", PARTIAL_EXIT_TIER1_FRACTION,
+                                       PARTIAL_EXIT_TIER1_TRIGGER,
+                                       move_to_be=PARTIAL_EXIT_MOVE_TO_BE)
+                        if r:
+                            results.append(r)
+                            fired_any = True
+                    except Exception as e:
+                        print(f"[AEGIS] Tier 1 exit failed for {ticker}: {e}")
+
+                # Tier 2 — only check if T1 already fired AND gain ≥ 12%
+                if (_hist["t1"] and not _hist["t2"]
+                        and pct_gain_decimal >= PARTIAL_EXIT_TIER2_TRIGGER):
+                    try:
+                        r = _fire_tier("t2", PARTIAL_EXIT_TIER2_FRACTION,
+                                       PARTIAL_EXIT_TIER2_TRIGGER,
+                                       move_to_be=False)  # stop already at breakeven
+                        if r:
+                            results.append(r)
+                            fired_any = True
+                    except Exception as e:
+                        print(f"[AEGIS] Tier 2 exit failed for {ticker}: {e}")
+
+                if fired_any:
+                    continue  # remaining qty gets trailing stop next AEGIS run
             # ── End partial exit ──────────────────────────────────────────────
 
             # Only handle longs for trailing stop (shorts need inverted logic)
