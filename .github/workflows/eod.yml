@@ -37,7 +37,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-agent.txt
 
       - name: AEGIS — trailing stops + partial exits
         run: python -c "from execution.alpaca import trail_positions; r=trail_positions(); print(f'[AEGIS] {len(r)} actions')"

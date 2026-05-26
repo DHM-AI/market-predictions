@@ -1,0 +1,25 @@
+# Full requirements for the agent / model / analyst code.
+# Used by GitHub Actions workflows (daily_scan, oracle, monthly_retrain,
+# trail_stops, eod, sentiment_guard, zeus, health_check).
+#
+# Dashboard uses the slim requirements.txt instead.
+
+# Dashboard deps (kept in sync)
+streamlit>=1.35
+pandas>=2.2
+numpy>=1.26
+plotly>=5.20
+ta>=0.11
+yfinance>=0.2.40
+alpaca-py>=0.26
+supabase>=2.4
+python-dotenv>=1.0
+requests>=2.31
+lxml>=5.0
+feedparser>=6.0
+
+# Agent-only deps (heavy — adds ~90s to install)
+anthropic>=0.30      # Claude API client (analyst, oracle, learning agent)
+xgboost>=2.0         # ML model for predictions
+scikit-learn>=1.4    # Calibration, metrics, train/test splits
+schedule>=1.2        # Local cron scheduler (legacy)

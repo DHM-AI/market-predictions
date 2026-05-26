@@ -1,16 +1,20 @@
+# Dashboard-only requirements — used by Streamlit Community Cloud.
+# Slim list (no xgboost / sklearn / anthropic) so Streamlit redeploys
+# in ~30-60s instead of 2-3 minutes.
+#
+# For agent / model / analyst code (GitHub Actions), use
+# requirements-agent.txt which includes everything below PLUS the
+# heavy ML & Claude packages.
+
 streamlit>=1.35
-yfinance>=0.2.40
 pandas>=2.2
 numpy>=1.26
-ta>=0.11
 plotly>=5.20
-anthropic>=0.30
+ta>=0.11
+yfinance>=0.2.40
+alpaca-py>=0.26
+supabase>=2.4
 python-dotenv>=1.0
 requests>=2.31
-schedule>=1.2
-xgboost>=2.0
-scikit-learn>=1.4
-supabase>=2.4
 lxml>=5.0
 feedparser>=6.0
-alpaca-py>=0.26
