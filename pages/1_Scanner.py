@@ -620,12 +620,17 @@ def live_alpaca():
         from alpaca.trading.requests import GetPortfolioHistoryRequest as _GPH
         _hist_today = _get_client().get_portfolio_history(
             _GPH(period="1D", timeframe="1H"))
-        # Alpaca's authoritative today-from-market-open P&L
-        _pl_arr = [v for v in (_hist_today.profit_loss or []) if v is not None]
-        _total_today = float(_pl_arr[-1]) if _pl_arr else (portfolio - acct.get("last_equity", portfolio))
+        # Alpaca's authoritative today-from-market-open P&L (same as Alpaca app shows)
+        _pl_arr  = [v for v in (_hist_today.profit_loss or [])     if v is not None]
+        _pct_arr = [v for v in (_hist_today.profit_loss_pct or []) if v is not None]
+        _total_today     = float(_pl_arr[-1])  if _pl_arr  else (portfolio - acct.get("last_equity", portfolio))
+        _total_today_pct = float(_pct_arr[-1]) * 100 if _pct_arr else (
+            (_total_today / acct.get("last_equity", portfolio)) * 100 if acct.get("last_equity") else 0
+        )
     except Exception:
         # Fallback: simple equity diff (still Alpaca-direct)
-        _total_today = portfolio - acct.get("last_equity", portfolio)
+        _total_today     = portfolio - acct.get("last_equity", portfolio)
+        _total_today_pct = (_total_today / acct.get("last_equity", portfolio)) * 100 if acct.get("last_equity") else 0
 
     # Closed Today = Today's P&L − currently floating unrealized
     # (both pulled straight from Alpaca — no fill matching)
@@ -666,9 +671,10 @@ def live_alpaca():
              _alltime_color,
              f"All-time profit vs starting equity of ${_start_equity:,.0f} (from Alpaca history).")
         + mc("P&L Today",
-             f"{_tot_sign}${abs(_total_today):,.2f}", "Direct from Alpaca",
+             f"{_tot_sign}${abs(_total_today):,.2f}",
+             f"{_tot_sign}{abs(_total_today_pct):.2f}% · from Alpaca",
              _total_color,
-             "Alpaca's official today-from-market-open P&L (portfolio_history API). Same number Alpaca shows in their app.")
+             "Alpaca's official today-from-market-open P&L. Matches the % shown in Alpaca's own dashboard.")
         + mc("Closed Today",
              f"{_rl_sign}${abs(_realized_today):,.2f}", "P&L Today − Open Now",
              _rl_color,
