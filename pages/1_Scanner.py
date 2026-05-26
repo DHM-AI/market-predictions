@@ -617,13 +617,20 @@ def live_alpaca():
     _ul_color       = GREEN if _unrealized_pl  > 0 else RED if _unrealized_pl  < 0 else TEXT2
     _ul_sign        = "+" if _unrealized_pl  >= 0 else ""
 
-    # Closed Today — sum actual closed trade P&L from Alpaca activity (days=1)
-    # The derived formula (_total_today - _unrealized_pl) is wrong because it
-    # ignores yesterday's carried-over unrealized P&L, producing misleading negatives.
+    # Closed Today — sum realized P&L for trades CLOSED today (ET).
+    # CRITICAL: must fetch a wide lookback (60 days) so the matcher can pair
+    # today's SELLs against BUYs from days/weeks ago. Then filter for today's
+    # date. Using days=1 misses positions opened earlier than yesterday.
     try:
         from execution.alpaca import get_closed_trade_pnl as _gct
-        _closed_trades_today = _gct(days=1)
-        _realized_today = sum(t.get("realized_pnl", 0) for t in _closed_trades_today)
+        from datetime import timezone as _tz, timedelta as _td
+        _today_et = datetime.now(_tz(_td(hours=-4))).strftime("%Y-%m-%d")
+        _all_closed = _gct(days=60)
+        _closed_today_filtered = [
+            t for t in _all_closed
+            if t.get("closed_at", "")[:10] == _today_et
+        ]
+        _realized_today = sum(t.get("realized_pnl", 0) for t in _closed_today_filtered)
     except Exception:
         _realized_today = 0
     _rl_color = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
