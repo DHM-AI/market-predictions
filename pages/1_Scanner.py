@@ -661,8 +661,14 @@ def live_alpaca():
     _alltime_color = GREEN if _alltime_pl > 0 else RED if _alltime_pl < 0 else TEXT2
     _alltime_sign  = "+" if _alltime_pl >= 0 else ""
 
+    # Realized All-Time = Total P&L − Open Unrealized (both Alpaca-direct)
+    # This is what actually got "locked in" from closing trades since account started.
+    _realized_alltime = _alltime_pl - _unrealized_pl
+    _rt_color = GREEN if _realized_alltime > 0 else RED if _realized_alltime < 0 else TEXT2
+    _rt_sign  = "+" if _realized_alltime >= 0 else ""
+
     st.markdown(
-        f'<div class="metrics-row" style="grid-template-columns:repeat(8,1fr);">'
+        f'<div class="metrics-row" style="grid-template-columns:repeat(9,1fr);">'
         + mc("Portfolio Value",
              f"${portfolio:,.0f}", "Total equity",
              GLOW, "Total Alpaca account value — cash + open positions.")
@@ -670,6 +676,10 @@ def live_alpaca():
              f"{_alltime_sign}${abs(_alltime_pl):,.2f}", "Since account started",
              _alltime_color,
              f"All-time profit vs starting equity of ${_start_equity:,.0f} (from Alpaca history).")
+        + mc("Realized All-Time",
+             f"{_rt_sign}${abs(_realized_alltime):,.2f}", "Locked in from closes",
+             _rt_color,
+             "Total P&L minus current open unrealized = real money locked in from every closed trade since the account started. Pure Alpaca, no fill matching.")
         + mc("P&L Today",
              f"{_tot_sign}${abs(_total_today):,.2f}",
              f"{_tot_sign}{abs(_total_today_pct):.2f}% · from Alpaca",
