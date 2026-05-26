@@ -1125,13 +1125,13 @@ if picks_df is not None and not picks_df.empty:
     _visible_tickers = tuple(sorted_df["ticker"].tolist())
     _cnames = _get_company_names(_visible_tickers)
 
-    # All cards in one scrollable container — 3 rows visible, scroll for the rest
+    # All cards in one scrollable container — 3 rows of 4 visible, scroll for the rest
 
     def _render_chunk_rows(df_to_render):
-        """Render trade cards in rows of 3."""
-        _chunks = [df_to_render.iloc[i:i+3] for i in range(0, len(df_to_render), 3)]
+        """Render trade cards in rows of 4."""
+        _chunks = [df_to_render.iloc[i:i+4] for i in range(0, len(df_to_render), 4)]
         for chunk in _chunks:
-            cols = st.columns(3)
+            cols = st.columns(4)
             for ci, (_, row) in enumerate(chunk.iterrows()):
                 ticker = row.get("ticker","")
                 score  = float(row.get("score",0))
