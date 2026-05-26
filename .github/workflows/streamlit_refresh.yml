@@ -1,26 +1,48 @@
 name: Streamlit Auto-Refresh
 
-# Triggers a fresh Streamlit Community Cloud deployment automatically
-# by pushing a timestamp commit after every code push or on a daily
-# schedule. Streamlit's GitHub webhook fires on every push to main —
-# this guarantees it never misses a code change.
+# Two-part strategy to prevent Streamlit from sleeping:
 #
-# The [skip ci] tag on the stamp commit prevents this from looping
-# back into GitHub Actions. Streamlit's webhook does NOT respect
-# [skip ci], so it still redeploys — exactly what we want.
+# 1. PING (every 2 hours, all week) — curl the app URL so Streamlit
+#    sees traffic and stays awake. No commit needed.
+#
+# 2. REDEPLOY (2× per weekday) — push a timestamp commit so Streamlit
+#    gets a fresh deployment before market open and after ORACLE runs.
+#    The [skip ci] tag prevents GitHub Actions from looping, but
+#    Streamlit's webhook fires anyway — exactly what we want.
 
 on:
   push:
     branches: [main]
     paths-ignore:
-      - '.streamlit/deploy_stamp.txt'  # don't loop on stamp commits
+      - '.streamlit/deploy_stamp.txt'
 
   schedule:
+    # ── Ping every 2 hours around the clock (keeps app awake) ──────────────
+    - cron: '0 0,2,4,6,8,10,12,14,16,18,20,22 * * *'
+    # ── Full redeploy twice per weekday ─────────────────────────────────────
     - cron: '0 11 * * 1-5'   # Mon–Fri 7 AM ET — fresh before market open
     - cron: '0 2  * * 2-6'   # Mon–Fri 10 PM ET — fresh after ORACLE runs
 
 jobs:
+  ping:
+    # Lightweight job — just wake the app, no checkout needed
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit to keep it awake
+        run: |
+          echo "Pinging Streamlit app..."
+          curl -s -o /dev/null -w "HTTP %{http_code}" \
+            --max-time 30 --retry 2 \
+            "https://ab2vk4qoxmhxtp5lze8hfl.streamlit.app/" \
+            || echo "Ping timed out (app may be waking — that's OK)"
+
   refresh:
+    # Full redeploy — only on push or the 7AM/10PM schedules
+    if: |
+      github.event_name == 'push' ||
+      github.event.schedule == '0 11 * * 1-5' ||
+      github.event.schedule == '0 2 * * 2-6'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,6 +52,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ping Streamlit first (wake before redeploy)
+        run: |
+          curl -s -o /dev/null -w "HTTP %{http_code}" \
+            --max-time 30 --retry 2 \
+            "https://ab2vk4qoxmhxtp5lze8hfl.streamlit.app/" \
+            || echo "Ping timed out — proceeding with redeploy"
 
       - name: Write deployment timestamp
         run: |
@@ -41,7 +70,6 @@ jobs:
           git config user.email "illuminati-bot@github.com"
           git config user.name  "Illuminati Bot"
           git add .streamlit/deploy_stamp.txt
-          # Only commit if the file actually changed
           git diff --staged --quiet && echo "No change — skipping" && exit 0
           git commit -m "chore: refresh Streamlit [skip ci]"
           git push
