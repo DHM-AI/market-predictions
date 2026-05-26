@@ -26,6 +26,40 @@ def _get_company_names(tickers: tuple) -> dict:
         pass
     return names
 
+# ── Expensive Alpaca calls — cached 25s (just under fragment refresh) ──────────
+# Without these, each page render triggers:
+#   • get_closed_trade_pnl() 2x (500 orders + FIFO match each = ~3-5s)
+#   • get_portfolio_history() 3x (1D today, 1D today, 1M start)
+# Caching collapses all to single shared calls per refresh cycle.
+@st.cache_data(ttl=25, show_spinner=False)
+def _cached_closed_trades(days: int = 60):
+    """Cache closed-trade FIFO matcher results for 25 seconds."""
+    from execution.alpaca import get_closed_trade_pnl
+    return get_closed_trade_pnl(days=days)
+
+@st.cache_data(ttl=25, show_spinner=False)
+def _cached_portfolio_history_today():
+    """Cache today's portfolio_history (1D, 1H timeframe) for 25 seconds."""
+    from execution.alpaca import _get_client
+    from alpaca.trading.requests import GetPortfolioHistoryRequest
+    h = _get_client().get_portfolio_history(
+        GetPortfolioHistoryRequest(period="1D", timeframe="1H"))
+    return {
+        "profit_loss":     list(h.profit_loss or []),
+        "profit_loss_pct": list(h.profit_loss_pct or []),
+        "equity":          list(h.equity or []),
+    }
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_account_start_equity():
+    """First equity value of the account, cached 1 hour (rarely changes)."""
+    from execution.alpaca import _get_client
+    from alpaca.trading.requests import GetPortfolioHistoryRequest
+    h = _get_client().get_portfolio_history(
+        GetPortfolioHistoryRequest(period="1M", timeframe="1D"))
+    eqs = [e for e in (h.equity or []) if e and e > 0]
+    return eqs[0] if eqs else None
+
 BG    = "#03060d"
 SURF  = "#07111f"
 SURF2 = "#0c1d30"
@@ -617,18 +651,14 @@ def live_alpaca():
     _unrealized_pl = total_pl  # from get_positions() → sums Alpaca's position.unrealized_pl
 
     try:
-        from alpaca.trading.requests import GetPortfolioHistoryRequest as _GPH
-        _hist_today = _get_client().get_portfolio_history(
-            _GPH(period="1D", timeframe="1H"))
-        # Alpaca's authoritative today-from-market-open P&L (same as Alpaca app shows)
-        _pl_arr  = [v for v in (_hist_today.profit_loss or [])     if v is not None]
-        _pct_arr = [v for v in (_hist_today.profit_loss_pct or []) if v is not None]
+        _hist_today = _cached_portfolio_history_today()
+        _pl_arr  = [v for v in _hist_today["profit_loss"]     if v is not None]
+        _pct_arr = [v for v in _hist_today["profit_loss_pct"] if v is not None]
         _total_today     = float(_pl_arr[-1])  if _pl_arr  else (portfolio - acct.get("last_equity", portfolio))
         _total_today_pct = float(_pct_arr[-1]) * 100 if _pct_arr else (
             (_total_today / acct.get("last_equity", portfolio)) * 100 if acct.get("last_equity") else 0
         )
     except Exception:
-        # Fallback: simple equity diff (still Alpaca-direct)
         _total_today     = portfolio - acct.get("last_equity", portfolio)
         _total_today_pct = (_total_today / acct.get("last_equity", portfolio)) * 100 if acct.get("last_equity") else 0
 
@@ -643,10 +673,9 @@ def live_alpaca():
     _today_wins_n     = 0
     _today_losses_n   = 0
     try:
-        from execution.alpaca import get_closed_trade_pnl as _gct
         from datetime import timezone as _tz, timedelta as _td
         _today_et = datetime.now(_tz(_td(hours=-4))).strftime("%Y-%m-%d")
-        _all_closed_60d = _gct(days=60)
+        _all_closed_60d = _cached_closed_trades(days=60)
         _today_trades = [
             t for t in _all_closed_60d
             if t.get("closed_at", "")[:10] == _today_et
@@ -672,14 +701,11 @@ def live_alpaca():
     _tot_sign    = _total_sign
 
     # All-time P&L = portfolio vs actual account starting equity (from Alpaca history)
-    # Cached in session state — only fetched once per session to avoid API overhead
+    # Uses module-level cached function (TTL 1 hour — rarely changes)
     if "account_start_equity" not in st.session_state:
         try:
-            from alpaca.trading.requests import GetPortfolioHistoryRequest
-            _hist = _get_client().get_portfolio_history(
-                GetPortfolioHistoryRequest(period="1M", timeframe="1D"))
-            _equities = [e for e in (_hist.equity or []) if e and e > 0]
-            st.session_state["account_start_equity"] = _equities[0] if _equities else portfolio
+            _start = _cached_account_start_equity()
+            st.session_state["account_start_equity"] = _start if _start else portfolio
         except Exception:
             st.session_state["account_start_equity"] = portfolio
 
@@ -1325,12 +1351,11 @@ if picks_df is not None and not picks_df.empty:
             st.markdown(f'<div style="color:{TEXT2};padding:20px;text-align:center;font-size:12px;">Chart unavailable: {e}</div>', unsafe_allow_html=True)
 
 # ── TRADE HISTORY ──────────────────────────────────────────────────────────────
-# Closed trade history — pull directly from Alpaca (catches ALL closes, not just DB entries)
+# Closed trade history — uses module-level cache so we don't hit Alpaca twice
 _alpaca_closed = []
 try:
     if alpaca_ok:
-        from execution.alpaca import get_closed_trade_pnl
-        _alpaca_closed = get_closed_trade_pnl(days=90)
+        _alpaca_closed = _cached_closed_trades(days=90)
 except Exception:
     pass
 
