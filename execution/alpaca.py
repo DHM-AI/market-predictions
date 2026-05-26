@@ -526,21 +526,57 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
 
 
 def close_position(ticker: str) -> dict:
-    """Close an open position immediately at market price."""
+    """
+    Close an open position immediately at market price.
+
+    Must cancel BOTH open and held orders before closing — bracket stop/TP
+    children sit in 'held' status and hold the position's shares hostage.
+    Without cancelling those, close_position() fails with 'insufficient qty'.
+    """
     if not is_configured():
         return {"status": "skipped"}
     try:
+        import time as _time
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+
         client = _get_client()
-        # Cancel any open bracket orders first
+
+        # Cancel ALL active orders for this ticker (open + held + new + accepted)
+        _active_statuses = {
+            "orderstatus.open", "orderstatus.new", "orderstatus.held",
+            "open", "new", "held", "pending_new", "accepted",
+        }
         try:
-            orders = client.get_orders()
-            for o in orders:
-                if o.symbol == ticker:
+            all_orders = client.get_orders(GetOrdersRequest(
+                status=QueryOrderStatus.ALL, limit=400))
+            cancelled = 0
+            for o in all_orders:
+                if o.symbol != ticker:
+                    continue
+                if str(getattr(o, "status", "")).lower() not in _active_statuses:
+                    continue
+                try:
                     client.cancel_order_by_id(str(o.id))
+                    cancelled += 1
+                except Exception:
+                    pass
+            # Give Alpaca a moment to release the held shares
+            if cancelled:
+                _time.sleep(0.5)
         except Exception:
             pass
-        # Close the position
-        client.close_position(ticker)
+
+        # Close the position — retry once with a longer wait if first attempt fails
+        try:
+            client.close_position(ticker)
+        except Exception as first_err:
+            if "insufficient" in str(first_err).lower() or "held" in str(first_err).lower():
+                _time.sleep(1.5)
+                client.close_position(ticker)
+            else:
+                raise
+
         return {"status": "closed", "ticker": ticker, "timestamp": datetime.now().isoformat()}
     except Exception as e:
         return {"status": "error", "reason": str(e), "ticker": ticker}

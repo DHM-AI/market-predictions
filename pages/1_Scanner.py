@@ -723,9 +723,11 @@ def live_alpaca():
         with ca2:
             if st.button("✓ Close All", type="primary", use_container_width=True,
                          key="confirm_close_all_yes"):
-                from execution.alpaca import close_position
+                from execution.alpaca import close_position, get_positions
+                import time as _t
                 closed, failed = [], []
                 with st.spinner(f"Closing {len(positions)} positions..."):
+                    # First pass — close all positions
                     for p in positions:
                         try:
                             r = close_position(p["ticker"])
@@ -735,11 +737,41 @@ def live_alpaca():
                                 failed.append(p["ticker"])
                         except Exception:
                             failed.append(p["ticker"])
+
+                    # Second pass — wait then retry anything still open (handles
+                    # race conditions where shares were briefly held by stale orders)
+                    if failed:
+                        _t.sleep(2)
+                        still_open = {pp["ticker"] for pp in get_positions()}
+                        retry_list = [t for t in failed if t in still_open]
+                        for tk in retry_list:
+                            try:
+                                r = close_position(tk)
+                                if r.get("status") == "closed":
+                                    failed.remove(tk)
+                                    closed.append(tk)
+                            except Exception:
+                                pass
+
+                    # Third pass — final retry after another wait
+                    if failed:
+                        _t.sleep(2)
+                        still_open = {pp["ticker"] for pp in get_positions()}
+                        retry_list = [t for t in failed if t in still_open]
+                        for tk in retry_list:
+                            try:
+                                r = close_position(tk)
+                                if r.get("status") == "closed":
+                                    failed.remove(tk)
+                                    closed.append(tk)
+                            except Exception:
+                                pass
+
                 st.session_state["confirm_close_all"] = False
                 if closed:
                     st.success(f"✓ Closed {len(closed)} positions: {', '.join(closed)}")
                 if failed:
-                    st.error(f"Failed to close: {', '.join(failed)}")
+                    st.error(f"Still stuck after 3 retries: {', '.join(failed)} — try clicking Close All again")
                 st.rerun()
         with ca3:
             if st.button("✗ Cancel", use_container_width=True, key="confirm_close_all_no"):
