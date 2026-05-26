@@ -22,4 +22,5 @@ feedparser>=6.0
 anthropic>=0.30      # Claude API client (analyst, oracle, learning agent)
 xgboost>=2.0         # ML model for predictions
 scikit-learn>=1.4    # Calibration, metrics, train/test splits
+pyarrow>=14.0        # Parquet engine for training_data cache (trainer.py)
 schedule>=1.2        # Local cron scheduler (legacy)

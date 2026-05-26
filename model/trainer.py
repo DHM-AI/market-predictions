@@ -30,6 +30,30 @@ from config import (
 
 SAVE_DIR = "model/saved"
 CACHE_PARQUET = "model/saved/training_data.parquet"
+CACHE_PICKLE  = "model/saved/training_data.pkl"   # fallback when parquet engine missing
+
+
+def _save_training_cache(df: pd.DataFrame) -> str:
+    """Save training data — prefer parquet, fall back to pickle if engine missing."""
+    try:
+        df.to_parquet(CACHE_PARQUET, index=False)
+        return CACHE_PARQUET
+    except (ImportError, ValueError) as e:
+        print(f"[trainer] parquet save failed ({e}); falling back to pickle")
+        df.to_pickle(CACHE_PICKLE)
+        return CACHE_PICKLE
+
+
+def _load_training_cache() -> pd.DataFrame | None:
+    """Load training data — try parquet first, then pickle fallback."""
+    if os.path.exists(CACHE_PARQUET):
+        try:
+            return pd.read_parquet(CACHE_PARQUET)
+        except Exception as e:
+            print(f"[trainer] parquet read failed ({e}); trying pickle")
+    if os.path.exists(CACHE_PICKLE):
+        return pd.read_pickle(CACHE_PICKLE)
+    return None
 
 
 def _fetch_training_data(tickers: list[str], years: int = 3) -> pd.DataFrame:
@@ -101,10 +125,11 @@ FEATURE_COLS = [
 def train(force_refetch: bool = False) -> None:
     os.makedirs(SAVE_DIR, exist_ok=True)
 
-    # Load or build training data
-    if os.path.exists(CACHE_PARQUET) and not force_refetch:
-        print(f"[trainer] Loading cached training data from {CACHE_PARQUET}")
-        data = pd.read_parquet(CACHE_PARQUET)
+    # Load or build training data — robust to parquet engine missing
+    cached = None if force_refetch else _load_training_cache()
+    if cached is not None:
+        print(f"[trainer] Loaded cached training data ({len(cached):,} rows)")
+        data = cached
     else:
         tickers = get_sp500_tickers()
         # Skip futures for training (less history, different dynamics)
@@ -112,8 +137,8 @@ def train(force_refetch: bool = False) -> None:
         if data.empty:
             print("[trainer] No training data — aborting.")
             return
-        data.to_parquet(CACHE_PARQUET, index=False)
-        print(f"[trainer] Cached training data to {CACHE_PARQUET}")
+        saved_to = _save_training_cache(data)
+        print(f"[trainer] Cached training data to {saved_to}")
 
     # Prepare features
     data = data.dropna(subset=FEATURE_COLS + ["label"])
