@@ -316,16 +316,26 @@ def _place_simple_order(ticker: str, dollar_amount: float, side: str,
 
 
 def get_positions() -> list[dict]:
-    """Return open positions with SL/TP info from open orders."""
+    """Return open positions with SL/TP info from active orders.
+
+    CRITICAL: must fetch HELD orders too — bracket stop/TP children sit in
+    'held' status. Filtering by OPEN only misses them and the dashboard
+    falls back to fake calculated values (entry × 0.97).
+    """
     if not is_configured():
         return []
     try:
         client    = _get_client()
         positions = client.get_all_positions()
-        # Get open bracket orders to find SL/TP levels
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
-        orders    = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        # Get ALL active orders (open + held + new + accepted)
+        _all = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.ALL, limit=400))
+        _active_statuses = {
+            "orderstatus.open", "orderstatus.new", "orderstatus.held",
+            "open", "new", "held", "pending_new", "accepted",
+        }
+        orders = [o for o in _all if str(getattr(o, "status", "")).lower() in _active_statuses]
         sl_tp_map    = {}   # ticker → {stop_loss, take_profit}
         trailing_set = set()  # tickers with an active native trailing stop
         for o in orders:
