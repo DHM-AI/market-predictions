@@ -785,24 +785,33 @@ def trail_positions(
                                trigger_pct: float, move_to_be: bool):
                     """Inner helper — fire one partial exit tier."""
                     nonlocal _abs_qty
+                    import math as _math
+                    # Detect non-fractionable assets — must use whole shares
+                    is_fractionable = True
+                    try:
+                        _asset = client.get_asset(ticker)
+                        is_fractionable = bool(getattr(_asset, "fractionable", True))
+                    except Exception:
+                        # If qty is already whole, assume non-fractionable safe
+                        is_fractionable = (abs(_abs_qty - round(_abs_qty)) > 1e-6)
+
                     # qty to close = 33% of ORIGINAL position
-                    # For T1: original = current (=_abs_qty)
-                    # For T2: original = current / (1 - T1_FRACTION) ≈ current / 0.67
                     if tier_name == "t1":
-                        close_qty = round(_abs_qty * fraction_to_close, 4)
+                        raw_qty = _abs_qty * fraction_to_close
                     else:
-                        # T2: same qty as T1 (record from history)
-                        close_qty = _hist.get("t1_qty", 0)
-                        if close_qty <= 0:
-                            # Fallback if T1 qty unknown — use 33% of current
-                            close_qty = round(_abs_qty * fraction_to_close, 4)
-                        close_qty = min(close_qty, _abs_qty)  # don't oversell
+                        raw_qty = _hist.get("t1_qty", 0) or (_abs_qty * fraction_to_close)
+                        raw_qty = min(raw_qty, _abs_qty)
+                    # Floor to whole shares for non-fractionable assets
+                    close_qty = _math.floor(raw_qty) if not is_fractionable else round(raw_qty, 4)
                     if close_qty <= 0:
                         return None
-                    remain_qty = round(_abs_qty - close_qty, 4)
+                    remain_qty = round(_abs_qty - close_qty, 4) if is_fractionable else int(_abs_qty - close_qty)
                     exit_side  = OrderSide.SELL if is_long else OrderSide.BUY
 
-                    # Cancel existing stops first (release held shares)
+                    # ── Snapshot existing stops BEFORE cancelling — so we can
+                    # restore them if the partial sell fails. Prevents the
+                    # "stops gone + sell failed = naked position" disaster.
+                    _stop_snapshots = []
                     for o in ticker_orders:
                         otype   = str(getattr(o, "type", "")).lower()
                         ostatus = str(getattr(o, "status", "")).lower()
@@ -810,17 +819,51 @@ def trail_positions(
                                 "orderstatus.open", "orderstatus.new",
                                 "orderstatus.held", "open", "new", "held",
                                 "pending_new"):
+                            _stop_snapshots.append({
+                                "type":  otype,
+                                "qty":   float(o.qty) if o.qty else _abs_qty,
+                                "side":  o.side,
+                                "stop_price":    float(o.stop_price) if o.stop_price else None,
+                                "trail_percent": float(getattr(o, "trail_percent", 0) or 0),
+                            })
                             try:
                                 client.cancel_order_by_id(str(o.id))
                             except Exception:
                                 pass
 
-                    # Market-close the tier qty
+                    # Market-close the tier qty — if it fails, RESTORE the stop
                     mreq = MarketOrderRequest(
                         symbol=ticker, qty=close_qty, side=exit_side,
                         time_in_force=TimeInForce.DAY,
                     )
-                    close_order = client.submit_order(mreq)
+                    try:
+                        close_order = client.submit_order(mreq)
+                    except Exception as _sell_err:
+                        # CRITICAL: restore the stop we just cancelled
+                        for _snap in _stop_snapshots:
+                            try:
+                                if "trailing" in _snap["type"] and _snap["trail_percent"]:
+                                    from alpaca.trading.requests import TrailingStopOrderRequest as _TSR
+                                    _restore = _TSR(
+                                        symbol=ticker, qty=_snap["qty"], side=_snap["side"],
+                                        time_in_force=TimeInForce.GTC,
+                                        trail_percent=_snap["trail_percent"],
+                                    )
+                                else:
+                                    _restore = StopOrderRequest(
+                                        symbol=ticker, qty=_snap["qty"], side=_snap["side"],
+                                        stop_price=_snap["stop_price"],
+                                        time_in_force=TimeInForce.GTC,
+                                    )
+                                client.submit_order(_restore)
+                            except Exception:
+                                try:
+                                    _restore.time_in_force = TimeInForce.DAY
+                                    client.submit_order(_restore)
+                                except Exception:
+                                    pass
+                        print(f"[AEGIS] {ticker} {tier_name} sell failed: {_sell_err} — restored stops")
+                        raise
 
                     # T1 moves remaining stop to breakeven
                     # T2 leaves stop at breakeven (already there from T1)
