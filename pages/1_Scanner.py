@@ -1392,6 +1392,18 @@ else:
     _l_label    = f'{_l_wr} <span style="font-size:9px;opacity:0.6;">({_l_wins}/{len(_longs)})</span>'
     _s_label    = f'{_s_wr} <span style="font-size:9px;opacity:0.6;">({_s_wins}/{len(_shorts)})</span>'
 
+    # Best & worst trades
+    _best_trade  = max(_alpaca_closed, key=lambda x: x.get("realized_pnl", 0))
+    _worst_trade = min(_alpaca_closed, key=lambda x: x.get("realized_pnl", 0))
+    _best_label  = (f'{_best_trade["ticker"]} '
+                    f'<span style="font-size:11px;color:{GREEN};">+${_best_trade["realized_pnl"]:,.0f}</span>'
+                    f'<br><span style="font-size:9px;opacity:0.6;color:{TEXT3};">'
+                    f'({_best_trade.get("realized_pnl_pct", 0):+.1f}%)</span>')
+    _worst_label = (f'{_worst_trade["ticker"]} '
+                    f'<span style="font-size:11px;color:{RED};">-${abs(_worst_trade["realized_pnl"]):,.0f}</span>'
+                    f'<br><span style="font-size:9px;opacity:0.6;color:{TEXT3};">'
+                    f'({_worst_trade.get("realized_pnl_pct", 0):+.1f}%)</span>')
+
     st.markdown(
         f'<div style="display:flex;gap:24px;align-items:center;padding:10px 16px;'
         f'background:rgba(0,180,255,0.04);border:1px solid rgba(0,180,255,0.1);'
@@ -1421,6 +1433,15 @@ else:
         f'text-transform:uppercase;color:{TEXT3};">Short W/R</span><br>'
         f'<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;'
         f'color:{RED};">{_s_label}</span></div>'
+        f'<div style="border-left:1px solid rgba(255,255,255,0.08);padding-left:20px;">'
+        f'<span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Best Trade</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;'
+        f'color:{TEXT};">{_best_label}</span></div>'
+        f'<div><span style="font-size:9px;font-weight:700;letter-spacing:1.5px;'
+        f'text-transform:uppercase;color:{TEXT3};">Worst Trade</span><br>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;'
+        f'color:{TEXT};">{_worst_label}</span></div>'
         f'</div>',
         unsafe_allow_html=True)
 
