@@ -700,9 +700,20 @@ def trail_positions(
         if not positions:
             return []
 
-        # Build map: ticker → open order list
-        open_orders = client.get_orders(
-            GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        # Build map: ticker → active order list
+        # Must include HELD orders — bracket stop/TP children are held, not open.
+        # Without held orders, AEGIS can't see or cancel bracket stops.
+        from alpaca.trading.enums import QueryOrderStatus as _QOS
+        _all_active = client.get_orders(
+            GetOrdersRequest(status=_QOS.ALL, limit=400))
+        _active_statuses = {
+            "orderstatus.open", "orderstatus.new", "orderstatus.held",
+            "open", "new", "held", "pending_new", "accepted",
+        }
+        open_orders = [
+            o for o in _all_active
+            if str(getattr(o, "status", "")).lower() in _active_statuses
+        ]
         orders_by_ticker: dict = {}
         for o in open_orders:
             orders_by_ticker.setdefault(o.symbol, []).append(o)

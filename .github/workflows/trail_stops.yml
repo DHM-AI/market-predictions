@@ -2,8 +2,13 @@ name: Trailing Stop Manager
 
 on:
   schedule:
-    # Every 30 min, Mon–Fri, 9:30 AM – 3:30 PM ET (13:30–19:30 UTC during EDT)
-    - cron: '0,30 13,14,15,16,17,18,19 * * 1-5'
+    # Every 30 min, Mon–Fri during market hours (9:00 AM – 4:00 PM ET)
+    - cron: '0,30 13,14,15,16,17,18,19,20 * * 1-5'
+    # Weekend runs — tighten stops so they're ready for Monday open
+    # Sat 9 AM ET + Sun 9 AM ET + Sun 6 PM ET (final prep before Monday)
+    - cron: '0 13 * * 6'    # Saturday  9 AM ET
+    - cron: '0 13 * * 0'    # Sunday    9 AM ET
+    - cron: '0 22 * * 0'    # Sunday    6 PM ET — final sweep before Monday open
   workflow_dispatch:   # allow manual trigger from GitHub Actions UI
 
 jobs:
