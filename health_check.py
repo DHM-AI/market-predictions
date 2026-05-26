@@ -187,6 +187,33 @@ try:
         else:
             report.add("Alpaca — Open Positions", "PASS", "No open positions")
 
+        # ── AEGIS watchdog — every open position MUST have a stop ─────────
+        # (queries ALL active orders, not just OPEN — bracket children live in HELD)
+        from alpaca.trading.requests import GetOrdersRequest as _GOR
+        from alpaca.trading.enums import QueryOrderStatus as _QOS
+        _all_ord = client.get_orders(_GOR(status=_QOS.ALL, limit=400))
+        _active  = {"orderstatus.open","orderstatus.new","orderstatus.held",
+                    "open","new","held","pending_new","accepted"}
+        _stopped = {o.symbol for o in _all_ord
+                    if str(getattr(o,"status","")).lower() in _active
+                    and "stop" in str(getattr(o,"type","")).lower()}
+        naked = [p["symbol"] for p in [{"symbol": pos.symbol} for pos in alpaca_positions]
+                 if p["symbol"] not in _stopped]
+        if naked:
+            report.add("AEGIS — Stop Coverage", "FAIL",
+                       f"{len(naked)} position(s) WITHOUT stops: {', '.join(naked[:10])}")
+            # Auto-fire AEGIS to fix it immediately
+            try:
+                from execution.alpaca import trail_positions
+                fixed = trail_positions()
+                report.add("AEGIS — Auto-Recovery", "WARN" if fixed else "FAIL",
+                           f"Triggered AEGIS, placed/upgraded {len(fixed)} stop(s)")
+            except Exception as _re:
+                report.add("AEGIS — Auto-Recovery", "FAIL", f"Failed: {str(_re)[:80]}")
+        else:
+            report.add("AEGIS — Stop Coverage", "PASS",
+                       f"All {n_pos} position(s) protected")
+
 except Exception as e:
     report.add("Alpaca", "FAIL", str(e)[:100])
 

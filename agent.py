@@ -405,6 +405,25 @@ def run_scan(send_email: bool = True,
         print("      [APEX] Alpaca execution skipped (--no-trade)")
         trade_results = []
 
+    # ── AEGIS piggyback ─────────────────────────────────────────────────────
+    # The dedicated trail_stops.yml workflow runs every 30 min but GitHub's
+    # free-tier scheduler skips crons under load. We've gone 24+ hours with
+    # zero AEGIS runs. So every daily_scan ALSO triggers AEGIS at the end —
+    # guarantees ≥12 AEGIS runs per market day even if the dedicated workflow
+    # is completely skipped.
+    try:
+        from execution.alpaca import trail_positions, is_configured as _alp_ok
+        if _alp_ok():
+            print(f"\n  [AEGIS piggyback] Trailing stop + partial exit sweep...")
+            aegis_results = trail_positions()
+            if aegis_results:
+                print(f"  [AEGIS piggyback] {len(aegis_results)} actions: "
+                      f"{', '.join(r['ticker'] for r in aegis_results[:8])}"
+                      + (f" +{len(aegis_results)-8} more" if len(aegis_results) > 8 else ""))
+            else:
+                print(f"  [AEGIS piggyback] No stops to upgrade right now.")
+    except Exception as _ae:
+        print(f"  [AEGIS piggyback] error: {_ae}")
 
     elapsed = time.time() - start
     print(f"\n{'='*62}")

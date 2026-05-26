@@ -39,6 +39,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: AEGIS — trailing stops + partial exits
+        run: python -c "from execution.alpaca import trail_positions; r=trail_positions(); print(f'[AEGIS] {len(r)} actions')"
+
       - name: Close intraday positions (3:50 PM)
         if: |
           github.event.schedule == '50 19 * * 1-5' ||
