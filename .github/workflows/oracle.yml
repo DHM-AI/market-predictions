@@ -1,0 +1,40 @@
+name: ORACLE — Daily Intelligence
+
+# Dedicated workflow so ORACLE never gets eaten by GitHub's free-tier
+# cron scheduler. Runs every weekday night at 10 PM ET (2 AM UTC next day).
+# Also runs on Saturday morning to capture week-end learnings.
+
+on:
+  schedule:
+    - cron: '0 2 * * 2-6'    # Mon–Fri 10 PM ET (= 2 AM UTC Tue-Sat)
+    - cron: '0 14 * * 6'     # Saturday 10 AM ET — weekend learning sweep
+  workflow_dispatch:          # manual trigger from GitHub Actions UI
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+      SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+      ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+      ALPACA_BASE_URL:    ${{ secrets.ALPACA_BASE_URL }}
+      ALPACA_LIVE_MODE:   ${{ secrets.ALPACA_LIVE_MODE }}
+      SLACK_WEBHOOK_URL:  ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ORACLE intelligence cycle
+        run: python -c "from analyst.oracle import run; run()"

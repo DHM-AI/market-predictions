@@ -95,32 +95,69 @@ def run() -> dict:
     print(f"[ORACLE] Daily intelligence cycle — {datetime.today().strftime('%Y-%m-%d %H:%M')}")
 
     rows = db.load_predictions(limit=500)
-    if not rows:
-        print("[ORACLE] No predictions to analyze yet.")
-        return {}
+    df = pd.DataFrame(rows) if rows else pd.DataFrame()
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
 
-    df = pd.DataFrame(rows)
-    df["date"] = pd.to_datetime(df["date"])
-
+    # ── PRIMARY DATA: 5-day-old predictions with actual_move_5d backfilled ──
     cutoff    = pd.Timestamp.today() - timedelta(days=5)
-    evaluated = df[df["date"] <= cutoff].dropna(subset=["actual_move_5d"])
+    evaluated = df[df["date"] <= cutoff].dropna(subset=["actual_move_5d"]) if not df.empty else pd.DataFrame()
 
-    if len(evaluated) < 5:
-        print(f"[ORACLE] Only {len(evaluated)} evaluated predictions — need 5+ to analyze.")
-        return {}
-
-    hits     = evaluated[evaluated["actual_move_5d"].abs() >= MOVE_TARGET_PCT * 100]
-    misses   = evaluated[evaluated["actual_move_5d"].abs() <  MOVE_TARGET_PCT * 100]
-    hit_rate = len(hits) / len(evaluated)
-
-    print(f"[ORACLE] {len(evaluated)} evaluated | Hit rate: {hit_rate:.1%} | "
-          f"Hits: {len(hits)} | Misses: {len(misses)}")
-
+    # ── FALLBACK DATA: actual closed Alpaca trades (immediate, no 5-day wait) ──
+    # This lets ORACLE start learning from day 1 instead of waiting a week.
+    closed_trades = []
     try:
         from execution.alpaca import get_closed_trade_pnl, is_configured
-        recent_trades = get_closed_trade_pnl(days=7) if is_configured() else []
-    except Exception:
-        recent_trades = []
+        if is_configured():
+            closed_trades = get_closed_trade_pnl(days=30)
+    except Exception as e:
+        print(f"[ORACLE] Could not load closed trades: {e}")
+
+    # Cold-start fallback: synthesize "evaluated" rows from closed Alpaca trades
+    # so ORACLE can learn from actual wins/losses immediately.
+    if len(evaluated) < 5 and closed_trades:
+        print(f"[ORACLE] Only {len(evaluated)} backfilled predictions — using {len(closed_trades)} closed trades as primary signal.")
+        synth_rows = []
+        for ct in closed_trades:
+            tk = ct.get("ticker")
+            pnl_pct = float(ct.get("realized_pnl_pct", 0))
+            side = ct.get("side", "long")
+            synth_rows.append({
+                "date":            pd.to_datetime(ct.get("closed_at", datetime.today().isoformat())),
+                "ticker":          tk,
+                "direction":       "bullish" if side == "long" else "bearish",
+                "actual_move_5d":  pnl_pct,
+                "signals_triggered": "",   # unknown from closed trade data
+                "score":           75,
+            })
+        if synth_rows:
+            evaluated = pd.DataFrame(synth_rows)
+
+    if len(evaluated) < 3:   # lowered from 5 to enable earlier learning
+        print(f"[ORACLE] Only {len(evaluated)} data points total — need 3+ to analyze. Skipping.")
+        return {}
+
+    # Hit definition differs by data source:
+    # - Backfilled predictions: "hit" = price moved >= MOVE_TARGET_PCT (20%) in 5 days
+    # - Closed Alpaca trades:   "hit" = trade closed profitably (any positive P&L)
+    if closed_trades and len(df.dropna(subset=["actual_move_5d"]) if not df.empty else []) < 5:
+        # Cold-start mode: use actual trade profitability as the hit signal
+        hits     = evaluated[evaluated["actual_move_5d"] > 0]
+        misses   = evaluated[evaluated["actual_move_5d"] <= 0]
+    else:
+        hits     = evaluated[evaluated["actual_move_5d"].abs() >= MOVE_TARGET_PCT * 100]
+        misses   = evaluated[evaluated["actual_move_5d"].abs() <  MOVE_TARGET_PCT * 100]
+    hit_rate = len(hits) / len(evaluated) if len(evaluated) else 0
+
+    print(f"[ORACLE] {len(evaluated)} data points | Hit rate: {hit_rate:.1%} | "
+          f"Hits: {len(hits)} | Misses: {len(misses)} | "
+          f"Sources: {len(df.dropna(subset=['actual_move_5d']) if not df.empty else [])} predictions + {len(closed_trades)} closed trades")
+
+    # Use already-fetched closed_trades (last 7 days for prompt context)
+    recent_trades = [
+        ct for ct in closed_trades
+        if ct.get("closed_at", "") >= (datetime.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+    ]
 
     prompt = _build_prompt(hits, misses, recent_trades)
     try:
