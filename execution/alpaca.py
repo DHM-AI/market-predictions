@@ -732,16 +732,8 @@ def trail_positions(
                     entry_px    = float(p.get("avg_entry_price", 0))
                     current_px  = float(p.get("current_price", 0))
 
-                    # Close partial position at market
-                    mreq = MarketOrderRequest(
-                        symbol        = ticker,
-                        qty           = close_qty,
-                        side          = exit_side,
-                        time_in_force = TimeInForce.DAY,
-                    )
-                    close_order = client.submit_order(mreq)
-
-                    # Cancel all existing stop orders (sized for full qty)
+                    # Cancel existing stops FIRST — shares held for stop orders
+                    # cannot be sold until those orders are released.
                     for o in ticker_orders:
                         otype   = str(getattr(o, "type", "")).lower()
                         ostatus = str(getattr(o, "status", "")).lower()
@@ -753,6 +745,15 @@ def trail_positions(
                                 client.cancel_order_by_id(str(o.id))
                             except Exception:
                                 pass
+
+                    # Close partial position at market (shares now free)
+                    mreq = MarketOrderRequest(
+                        symbol        = ticker,
+                        qty           = close_qty,
+                        side          = exit_side,
+                        time_in_force = TimeInForce.DAY,
+                    )
+                    close_order = client.submit_order(mreq)
 
                     # Move remaining stop to breakeven (entry price)
                     if PARTIAL_EXIT_MOVE_TO_BE and remain_qty > 0 and entry_px > 0:
