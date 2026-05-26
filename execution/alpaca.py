@@ -426,99 +426,96 @@ def get_closed_trade_pnl(days: int = 60) -> list[dict]:
         for o in filled:
             by_ticker.setdefault(o.symbol, []).append(o)
 
+        # ── FIFO matching — same accounting method Alpaca uses ───────────────
+        # Walks fills in chronological order, tracking remaining qty per entry.
+        # An exit consumes entries from the oldest-first; if exit qty > oldest
+        # entry remaining, it spills to the next entry. Each share is matched
+        # exactly once → no double-counting, no inflated P&L.
         results = []
         for ticker, orders in by_ticker.items():
-            buys  = sorted([o for o in orders if "buy"  in str(o.side).lower()],
-                           key=lambda o: o.filled_at)
-            sells = sorted([o for o in orders if "sell" in str(o.side).lower()],
-                           key=lambda o: o.filled_at)
+            # Sort all fills chronologically (mix of buy + sell)
+            fills = sorted(orders, key=lambda o: o.filled_at)
 
-            # ── LONG exits: sell closes a prior buy ─────────────────────────
-            for sell in sells:
-                prior_buys = [b for b in buys if b.filled_at < sell.filled_at]
-                if not prior_buys:
-                    continue
-                buy = prior_buys[-1]
+            # Open lots: list of dicts tracking remaining shares per entry
+            # For longs: lots have side="long", positive qty (opened by buy)
+            # For shorts: lots have side="short", positive qty (opened by sell)
+            open_lots: list = []
 
-                entry_price = float(buy.filled_avg_price)
-                exit_price  = float(sell.filled_avg_price)
-                qty         = float(sell.filled_qty)
+            for fill in fills:
+                fill_side = str(fill.side).lower()
+                fill_qty  = float(fill.filled_qty)
+                fill_px   = float(fill.filled_avg_price)
+                fill_type = str(getattr(fill, "type", "")).lower()
+                fill_time = str(fill.filled_at)[:16].replace("T", " ")
+                is_buy    = "buy" in fill_side
 
-                realized_pnl     = round((exit_price - entry_price) * qty, 2)
-                realized_pnl_pct = round((exit_price / entry_price - 1) * 100, 2) if entry_price else 0
-
-                sell_type = str(getattr(sell, "type", "")).lower()
-                if "limit" in sell_type and realized_pnl > 0:
-                    outcome = "tp_hit"
-                elif "stop" in sell_type and realized_pnl < 0:
-                    outcome = "sl_hit"
+                # Determine if this fill OPENS or CLOSES a lot.
+                # Default rule: BUY opens long, SELL opens short — UNLESS
+                # there's an opposing open lot, in which case it closes.
+                if is_buy:
+                    # BUY closes any open SHORT lots first (FIFO cover)
+                    short_lots = [l for l in open_lots if l["side"] == "short"]
+                    if short_lots:
+                        qty_to_close = fill_qty
+                        while qty_to_close > 0 and short_lots:
+                            lot = short_lots[0]
+                            matched = min(qty_to_close, lot["qty"])
+                            pnl = round((lot["price"] - fill_px) * matched, 2)
+                            pnl_pct = round((lot["price"] / fill_px - 1) * 100, 2) if fill_px else 0
+                            outcome = ("tp_hit" if "limit" in fill_type and pnl > 0
+                                       else "sl_hit" if "stop" in fill_type and pnl < 0
+                                       else "manual")
+                            results.append({
+                                "ticker": ticker, "side": "short", "qty": matched,
+                                "entry_price": round(lot["price"], 2),
+                                "exit_price":  round(fill_px, 2),
+                                "realized_pnl": pnl, "realized_pnl_pct": pnl_pct,
+                                "outcome": outcome, "closed_at": fill_time,
+                            })
+                            lot["qty"] -= matched
+                            qty_to_close -= matched
+                            if lot["qty"] <= 1e-9:
+                                open_lots.remove(lot)
+                                short_lots = [l for l in open_lots if l["side"] == "short"]
+                        # Any remaining buy qty opens a new LONG lot
+                        if qty_to_close > 1e-9:
+                            open_lots.append({"side": "long", "price": fill_px, "qty": qty_to_close, "time": fill_time})
+                    else:
+                        # No shorts to close → open a long lot
+                        open_lots.append({"side": "long", "price": fill_px, "qty": fill_qty, "time": fill_time})
                 else:
-                    outcome = "manual"
+                    # SELL closes any open LONG lots first (FIFO)
+                    long_lots = [l for l in open_lots if l["side"] == "long"]
+                    if long_lots:
+                        qty_to_close = fill_qty
+                        while qty_to_close > 0 and long_lots:
+                            lot = long_lots[0]
+                            matched = min(qty_to_close, lot["qty"])
+                            pnl = round((fill_px - lot["price"]) * matched, 2)
+                            pnl_pct = round((fill_px / lot["price"] - 1) * 100, 2) if lot["price"] else 0
+                            outcome = ("tp_hit" if "limit" in fill_type and pnl > 0
+                                       else "sl_hit" if "stop" in fill_type and pnl < 0
+                                       else "manual")
+                            results.append({
+                                "ticker": ticker, "side": "long", "qty": matched,
+                                "entry_price": round(lot["price"], 2),
+                                "exit_price":  round(fill_px, 2),
+                                "realized_pnl": pnl, "realized_pnl_pct": pnl_pct,
+                                "outcome": outcome, "closed_at": fill_time,
+                            })
+                            lot["qty"] -= matched
+                            qty_to_close -= matched
+                            if lot["qty"] <= 1e-9:
+                                open_lots.remove(lot)
+                                long_lots = [l for l in open_lots if l["side"] == "long"]
+                        # Any remaining sell qty opens a new SHORT lot
+                        if qty_to_close > 1e-9:
+                            open_lots.append({"side": "short", "price": fill_px, "qty": qty_to_close, "time": fill_time})
+                    else:
+                        # No longs to close → open a short lot
+                        open_lots.append({"side": "short", "price": fill_px, "qty": fill_qty, "time": fill_time})
 
-                results.append({
-                    "ticker":           ticker,
-                    "side":             "long",
-                    "qty":              qty,
-                    "entry_price":      round(entry_price, 2),
-                    "exit_price":       round(exit_price, 2),
-                    "realized_pnl":     realized_pnl,
-                    "realized_pnl_pct": realized_pnl_pct,
-                    "outcome":          outcome,
-                    "closed_at":        str(sell.filled_at)[:16].replace("T", " "),
-                })
-
-            # ── SHORT exits: buy-to-cover closes a prior sell ────────────────
-            for buy in buys:
-                prior_sells = [s for s in sells if s.filled_at < buy.filled_at]
-                if not prior_sells:
-                    continue
-                # Check this buy isn't already used as a long entry
-                # (if there's a prior buy before this sell, it's a long entry not a short)
-                entry_sell = prior_sells[-1]
-                # Only treat as short exit if the sell came before this buy
-                # AND there's no prior buy (i.e., the position was opened by a sell)
-                prior_buys_before_sell = [b2 for b2 in buys if b2.filled_at < entry_sell.filled_at]
-                if prior_buys_before_sell:
-                    continue  # there was a buy before the sell → long trade, already handled
-
-                entry_price = float(entry_sell.filled_avg_price)
-                exit_price  = float(buy.filled_avg_price)
-                qty         = float(buy.filled_qty)
-
-                # Short P&L: profit when exit (cover) is below entry (short)
-                realized_pnl     = round((entry_price - exit_price) * qty, 2)
-                realized_pnl_pct = round((entry_price / exit_price - 1) * 100, 2) if exit_price else 0
-
-                buy_type = str(getattr(buy, "type", "")).lower()
-                if "limit" in buy_type and realized_pnl > 0:
-                    outcome = "tp_hit"
-                elif "stop" in buy_type and realized_pnl < 0:
-                    outcome = "sl_hit"
-                else:
-                    outcome = "manual"
-
-                results.append({
-                    "ticker":           ticker,
-                    "side":             "short",
-                    "qty":              qty,
-                    "entry_price":      round(entry_price, 2),
-                    "exit_price":       round(exit_price, 2),
-                    "realized_pnl":     realized_pnl,
-                    "realized_pnl_pct": realized_pnl_pct,
-                    "outcome":          outcome,
-                    "closed_at":        str(buy.filled_at)[:16].replace("T", " "),
-                })
-
-        # Deduplicate (same ticker+closed_at can appear from both loops on mixed books)
-        seen = set()
-        deduped = []
-        for r in results:
-            key = (r["ticker"], r["closed_at"], r["realized_pnl"])
-            if key not in seen:
-                seen.add(key)
-                deduped.append(r)
-
-        return sorted(deduped, key=lambda x: x["closed_at"], reverse=True)
+        return sorted(results, key=lambda x: x["closed_at"], reverse=True)
 
     except Exception as e:
         print(f"[APEX] get_closed_trade_pnl error: {e}")
