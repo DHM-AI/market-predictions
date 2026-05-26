@@ -27,3 +27,6 @@ build/
 *.swp
 .idea/
 .vscode/
+
+# Session state — never commit
+.claude-flow/

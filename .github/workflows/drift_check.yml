@@ -1,0 +1,35 @@
+name: Model Drift Check
+
+# Weekly calibration drift evaluation. Compares calibrated probabilities to
+# actual outcomes over the trailing 60 days, alerts Slack if any bucket has
+# drifted by more than 12 percentage points.
+
+on:
+  schedule:
+    # Sundays 9 AM ET (13:00 UTC during EDT)
+    - cron: '0 13 * * 0'
+  workflow_dispatch:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+      SLACK_WEBHOOK_URL:  ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-agent.txt
+
+      - name: Run drift check
+        run: python -m model.drift_check

@@ -110,7 +110,10 @@ def _fetch_regime() -> dict:
             spy_trend = "sideways"
 
         # ── Sector breadth ────────────────────────────────────────────────────
+        # Also capture per-ETF status so sector_momentum signal can read it
+        # without a second yfinance call.
         sectors_above = 0
+        sector_status: dict[str, bool] = {}   # {etf: True if above 50ma}
         try:
             etf_data = yf.download(SECTOR_ETFS, period="3mo", interval="1d",
                                    progress=False, auto_adjust=True, group_by="ticker")
@@ -120,12 +123,15 @@ def _fetch_regime() -> dict:
                     if len(s.dropna()) >= 50:
                         price = float(s.dropna().iloc[-1])
                         ma50  = float(s.dropna().rolling(50).mean().iloc[-1])
-                        if price > ma50:
+                        is_above = price > ma50
+                        sector_status[etf] = is_above
+                        if is_above:
                             sectors_above += 1
                 except Exception:
-                    pass
+                    sector_status[etf] = False
         except Exception:
             sectors_above = 6   # assume neutral if fetch fails
+            sector_status = {etf: True for etf in SECTOR_ETFS[:6]}  # half-up neutral fallback
 
         if sectors_above >= 7:
             breadth = "strong"
@@ -200,6 +206,8 @@ def _fetch_regime() -> dict:
             "spy_vs_50ma_pct":   spy_vs_50ma_pct,
             "spy_trend":         spy_trend,
             "sectors_above_50ma": sectors_above,
+            "sector_status":     sector_status,     # {XLK: True, XLF: False, ...}
+            "total_sectors":     len(SECTOR_ETFS),
             "breadth":           breadth,
             "bull_multiplier":   round(bull_multiplier, 2),
             "auto_exec_ok":      auto_exec_ok,
@@ -208,6 +216,9 @@ def _fetch_regime() -> dict:
 
     except Exception as e:
         print(f"[regime] Error fetching regime: {e}")
+        # Neutral fallback — assume half of sectors are above 50MA so the
+        # sector_momentum signal degrades gracefully (not all biased one way).
+        fallback_status = {etf: (i < 6) for i, etf in enumerate(SECTOR_ETFS)}
         return {
             "regime":            "neutral",
             "vix":               20.0,
@@ -216,6 +227,8 @@ def _fetch_regime() -> dict:
             "spy_vs_50ma_pct":   0.0,
             "spy_trend":         "sideways",
             "sectors_above_50ma": 5,
+            "sector_status":     fallback_status,
+            "total_sectors":     len(SECTOR_ETFS),
             "breadth":           "normal",
             "bull_multiplier":   1.0,
             "auto_exec_ok":      True,

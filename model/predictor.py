@@ -7,14 +7,19 @@ import numpy as np
 from signals.technicals import compute_feature_row
 from signals.sentiment import normalize_score
 from signals.scorer import score_universe as rule_score_universe
-from config import MODEL_PATH, FEATURE_NAMES_PATH, XGB_WEIGHT, SENTIMENT_WEIGHT, MIN_SCORE_TO_ALERT
+from config import (
+    MODEL_PATH, FEATURE_NAMES_PATH, CALIBRATOR_PATH, ENABLE_CALIBRATION,
+    XGB_WEIGHT, SENTIMENT_WEIGHT, MIN_SCORE_TO_ALERT,
+)
 
 _model = None
+_calibrator = None
 _feature_names: list[str] = []
 
 
 def _load_model():
-    global _model, _feature_names
+    """Lazy-load the XGB model, the Platt-scaling calibrator, and feature names."""
+    global _model, _calibrator, _feature_names
     if _model is not None:
         return _model
     if not os.path.exists(MODEL_PATH):
@@ -24,6 +29,16 @@ def _load_model():
     if os.path.exists(FEATURE_NAMES_PATH):
         with open(FEATURE_NAMES_PATH) as f:
             _feature_names = json.load(f)
+    # Load calibrator if present + enabled. Missing calibrator just means we
+    # fall back to raw XGB probabilities (no error).
+    if ENABLE_CALIBRATION and os.path.exists(CALIBRATOR_PATH):
+        try:
+            with open(CALIBRATOR_PATH, "rb") as f:
+                _calibrator = pickle.load(f)
+            print(f"[predictor] Loaded Platt calibrator → {CALIBRATOR_PATH}")
+        except Exception as e:
+            print(f"[predictor] Calibrator load failed: {e} (falling back to raw)")
+            _calibrator = None
     return _model
 
 
@@ -31,7 +46,13 @@ def model_available() -> bool:
     return os.path.exists(MODEL_PATH)
 
 
+def calibrator_available() -> bool:
+    _load_model()  # ensure load attempted
+    return _calibrator is not None
+
+
 def _xgb_prob(df: pd.DataFrame) -> float:
+    """Return calibrated probability if calibrator is loaded, else raw XGB prob."""
     model = _load_model()
     if model is None or df.empty:
         return 0.0
@@ -41,8 +62,15 @@ def _xgb_prob(df: pd.DataFrame) -> float:
         features = compute_feature_row(df)
         row = [features.get(col, 0.0) for col in _feature_names]
         X = np.array(row).reshape(1, -1)
-        prob = float(model.predict_proba(X)[0][1])
-        return max(0.0, min(1.0, prob))
+        raw_prob = float(model.predict_proba(X)[0][1])
+
+        # Platt scaling — maps raw XGB prob to calibrated probability.
+        # Without this, "0.72" doesn't mean 72% win rate.
+        if _calibrator is not None:
+            cal_prob = float(_calibrator.predict_proba(np.array([[raw_prob]]))[0][1])
+            return max(0.0, min(1.0, cal_prob))
+
+        return max(0.0, min(1.0, raw_prob))
     except Exception:
         return 0.0
 
@@ -88,7 +116,8 @@ def predict_universe(
         # Re-use rule scorer for direction/duration/signals labels (no re-fetch)
         meta = score_ticker(ticker, df, sentiment, earnings)
         meta["score"] = round(blended, 1)
-        meta["xgb_prob"] = round(xgb_prob, 4)
+        meta["xgb_prob"] = round(xgb_prob, 4)        # calibrated if available
+        meta["calibrated"] = calibrator_available()  # transparency flag
         rows.append(meta)
 
     if not rows:

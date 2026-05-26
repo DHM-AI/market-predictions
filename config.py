@@ -66,17 +66,19 @@ EARNINGS_PROXIMITY_DAYS = 10
 
 # ── Scoring weights (must sum to 100) ─────────────────────────────────────────
 WEIGHTS = {
-    "bb_squeeze":         18,   # was 25 — reduced to make room for new signals
-    "atr_compression":    10,   # was 15
-    "volume_surge":       15,   # was 20
-    "sentiment_spike":    15,   # was 20
-    "rsi_extreme":        10,   # unchanged
-    "earnings_proximity":  7,   # was 10
-    "candlestick":         8,   # NEW — pattern detection (hammer, engulfing, pin bar)
-    "options_flow":       10,   # NEW — put/call ratio institutional signal
-    "short_squeeze":       7,   # NEW — high short interest + bullish momentum
+    "bb_squeeze":         15,   # was 18 — trimmed for insider/analyst
+    "atr_compression":     8,   # was 10
+    "volume_surge":       13,   # was 15
+    "sentiment_spike":    13,   # was 15
+    "rsi_extreme":         9,   # was 10
+    "earnings_proximity":  6,   # was 7
+    "candlestick":         7,   # was 8
+    "options_flow":        9,   # was 10
+    "short_squeeze":       5,   # was 7
+    "insider_activity":    8,   # NEW — SEC Form 4 cluster buys
+    "analyst_revisions":   7,   # NEW — upgrade/downgrade momentum
 }
-# Total: 18+10+15+15+10+7+8+10+7 = 100
+# Total: 15+8+13+13+9+6+7+9+5+8+7 = 100
 
 # ── Market regime ──────────────────────────────────────────────────────────────
 REGIME_CACHE_MINUTES  = 30   # re-fetch regime every 30 minutes during scan
@@ -164,12 +166,14 @@ LOGS_DIR            = "logs"
 PREDICTIONS_CSV     = "logs/predictions.csv"   # legacy, kept for compat
 MODEL_PATH          = "model/saved/xgb_model.pkl"
 FEATURE_NAMES_PATH  = "model/saved/feature_names.json"
+CALIBRATOR_PATH     = "model/saved/calibrator.pkl"   # Platt scaling on top of XGB
+ENABLE_CALIBRATION  = True                            # set False to bypass and use raw XGB probs
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 SCAN_TIME_ET = "08:00"
 
 # ── Training ──────────────────────────────────────────────────────────────────
-TRAIN_YEARS        = 3
+TRAIN_YEARS        = 5     # bumped from 3 → 5 (now includes 2020 COVID + 2022 bear)
 TRAIN_TEST_SPLIT   = 0.80
 
 # ── Crypto ────────────────────────────────────────────────────────────────────

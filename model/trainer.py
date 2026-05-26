@@ -17,12 +17,16 @@ import yfinance as yf
 from datetime import datetime, timedelta
 from xgboost import XGBClassifier
 from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.metrics import classification_report, roc_auc_score, brier_score_loss
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 
 from data.universe import get_sp500_tickers, FUTURES
 from signals.technicals import compute_feature_row
-from config import TRAIN_YEARS, TRAIN_TEST_SPLIT, MOVE_TARGET_PCT, MODEL_PATH, FEATURE_NAMES_PATH
+from config import (
+    TRAIN_YEARS, TRAIN_TEST_SPLIT, MOVE_TARGET_PCT,
+    MODEL_PATH, FEATURE_NAMES_PATH, CALIBRATOR_PATH,
+)
 
 SAVE_DIR = "model/saved"
 CACHE_PARQUET = "model/saved/training_data.parquet"
@@ -118,18 +122,25 @@ def train(force_refetch: bool = False) -> None:
     X = data[FEATURE_COLS].values
     y = data["label"].values
 
-    # Walk-forward split (no lookahead)
-    split_idx = int(len(data) * TRAIN_TEST_SPLIT)
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+    # ── Walk-forward 3-way split (no lookahead) ────────────────────────────
+    # train (70%)  → fit XGBoost
+    # calib (10%)  → fit Platt scaling on XGB outputs
+    # test  (20%)  → final evaluation (calibrated + uncalibrated)
+    n = len(data)
+    train_end = int(n * 0.70)
+    calib_end = int(n * 0.80)
+    X_train, X_calib, X_test = X[:train_end], X[train_end:calib_end], X[calib_end:]
+    y_train, y_calib, y_test = y[:train_end], y[train_end:calib_end], y[calib_end:]
 
-    print(f"[trainer] Train rows: {len(X_train):,} | Test rows: {len(X_test):,}")
+    print(
+        f"[trainer] Train: {len(X_train):,} | Calib: {len(X_calib):,} | Test: {len(X_test):,}"
+    )
     pos_rate = y_train.mean()
     print(f"[trainer] Positive rate (train): {pos_rate:.2%}")
 
     scale_pos_weight = (1 - pos_rate) / pos_rate if pos_rate > 0 else 1.0
 
-    # Train XGBoost
+    # ── Train XGBoost ──────────────────────────────────────────────────────
     model = XGBClassifier(
         n_estimators=300,
         max_depth=5,
@@ -148,23 +159,56 @@ def train(force_refetch: bool = False) -> None:
         verbose=50,
     )
 
-    # Evaluate
+    # ── Evaluate uncalibrated model on test set ────────────────────────────
     y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)[:, 1]
-    print("\n[trainer] Classification Report (test set):")
+    y_prob_raw = model.predict_proba(X_test)[:, 1]
+    print("\n[trainer] Classification Report (test set, uncalibrated):")
     print(classification_report(y_test, y_pred))
     try:
-        auc = roc_auc_score(y_test, y_prob)
-        print(f"[trainer] AUC-ROC: {auc:.4f}")
+        auc = roc_auc_score(y_test, y_prob_raw)
+        brier_raw = brier_score_loss(y_test, y_prob_raw)
+        print(f"[trainer] AUC-ROC: {auc:.4f}  |  Brier (raw): {brier_raw:.4f}")
     except Exception:
         pass
 
-    # Save model and feature names
+    # ── Fit Platt scaling on the calibration slice ─────────────────────────
+    # Platt = logistic regression mapping raw XGB prob -> calibrated prob.
+    # Trained on a SEPARATE slice (calib) so it doesn't leak from train or test.
+    print("\n[trainer] Fitting Platt scaling on calibration slice...")
+    calib_probs_raw = model.predict_proba(X_calib)[:, 1].reshape(-1, 1)
+    calibrator = LogisticRegression(solver="lbfgs", max_iter=1000)
+    calibrator.fit(calib_probs_raw, y_calib)
+
+    # Evaluate calibrated probabilities on test set
+    test_probs_calibrated = calibrator.predict_proba(y_prob_raw.reshape(-1, 1))[:, 1]
+    try:
+        brier_cal = brier_score_loss(y_test, test_probs_calibrated)
+        print(f"[trainer] Brier (calibrated): {brier_cal:.4f}  "
+              f"(lower = better; expect drop from {brier_raw:.4f})")
+
+        # Reliability check: bucket predictions by decile and compare predicted vs actual
+        print("\n[trainer] Reliability table (calibrated):")
+        print("  bucket   pred_avg   actual_rate   count")
+        for lo, hi in [(0.0, 0.3), (0.3, 0.4), (0.4, 0.5),
+                       (0.5, 0.6), (0.6, 0.7), (0.7, 1.0)]:
+            mask = (test_probs_calibrated >= lo) & (test_probs_calibrated < hi)
+            n_b = int(mask.sum())
+            if n_b > 0:
+                p_avg = test_probs_calibrated[mask].mean()
+                a_rate = y_test[mask].mean()
+                print(f"  {lo:.2f}-{hi:.2f}   {p_avg:.3f}      {a_rate:.3f}        {n_b:,}")
+    except Exception as e:
+        print(f"[trainer] Calibration eval skipped: {e}")
+
+    # ── Save model + calibrator + feature names ────────────────────────────
     with open(MODEL_PATH, "wb") as f:
         pickle.dump(model, f)
+    with open(CALIBRATOR_PATH, "wb") as f:
+        pickle.dump(calibrator, f)
     with open(FEATURE_NAMES_PATH, "w") as f:
         json.dump(FEATURE_COLS, f)
-    print(f"\n[trainer] Saved model → {MODEL_PATH}")
+    print(f"\n[trainer] Saved model      → {MODEL_PATH}")
+    print(f"[trainer] Saved calibrator → {CALIBRATOR_PATH}")
     print(f"[trainer] Saved feature names → {FEATURE_NAMES_PATH}")
 
 

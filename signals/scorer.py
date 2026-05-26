@@ -3,8 +3,15 @@ import pandas as pd
 from signals.technicals import compute_all
 from signals.sentiment import get_sentiment_with_velocity, normalize_score
 from signals.patterns import detect_patterns
+from signals.insider import get_insider_signal
+from signals.analyst import get_analyst_signal
+from signals.weekly_trend import get_weekly_trend, weekly_modifier
+from signals.sector_momentum import get_sector_momentum
 from data.fetcher import get_earnings_days
 from config import WEIGHTS, EARNINGS_PROXIMITY_DAYS, MIN_SCORE_TO_ALERT
+
+
+SECTOR_MOMENTUM_BONUS = 5   # soft +5 for picks whose sector ETF is above 50MA
 
 
 def _determine_direction(technicals: dict, sentiment: dict) -> str:
@@ -152,15 +159,97 @@ def score_ticker(
             and 35 < technicals["rsi"]["value"] < 55   # recovering from oversold
             and technicals["vol"]["triggered"]           # volume surge
             and technicals["bb"]["triggered"]):          # squeeze setup
-        squeeze_pts = WEIGHTS.get("short_squeeze", 7)
+        squeeze_pts = WEIGHTS.get("short_squeeze", 5)
         raw_score  += squeeze_pts
         breakdown["short_squeeze"] = squeeze_pts
         signals_triggered.append(f"Squeeze proxy (RSI recovering + volume surge)")
     else:
         breakdown["short_squeeze"] = 0
 
+    # ── Insider activity (SEC Form 4 cluster buys/sells, cached 24h) ───────
+    insider_data = {"side": "neutral", "triggered": False, "strength": 0.0, "summary": ""}
+    try:
+        insider_data = get_insider_signal(ticker)
+    except Exception as e:
+        print(f"[scorer] insider fetch failed for {ticker}: {e}")
+    insider_weight = WEIGHTS.get("insider_activity", 8)
+    direction_so_far = _determine_direction(technicals, sentiment)
+    _dir_prefix2 = {"bullish": "bull", "bearish": "bear"}.get(direction_so_far, "neutral")
+    if insider_data["triggered"] and insider_data["side"] == _dir_prefix2:
+        pts = round(insider_weight * insider_data["strength"])
+        raw_score += pts
+        breakdown["insider_activity"] = pts
+        if insider_data["summary"]:
+            signals_triggered.append(insider_data["summary"])
+    elif insider_data["triggered"] and insider_data["side"] != "neutral" and insider_data["side"] != _dir_prefix2:
+        # Insider activity contradicts current direction — penalize
+        penalty = round(insider_weight * 0.4)
+        raw_score = max(0, raw_score - penalty)
+        breakdown["insider_activity"] = -penalty
+    else:
+        breakdown["insider_activity"] = 0
+
+    # ── Analyst revisions (upgrades vs downgrades over 30d, cached 24h) ────
+    analyst_data = {"side": "neutral", "triggered": False, "strength": 0.0, "summary": ""}
+    try:
+        analyst_data = get_analyst_signal(ticker)
+    except Exception as e:
+        print(f"[scorer] analyst fetch failed for {ticker}: {e}")
+    analyst_weight = WEIGHTS.get("analyst_revisions", 7)
+    if analyst_data["triggered"] and analyst_data["side"] == _dir_prefix2:
+        pts = round(analyst_weight * analyst_data["strength"])
+        raw_score += pts
+        breakdown["analyst_revisions"] = pts
+        if analyst_data["summary"]:
+            signals_triggered.append(analyst_data["summary"])
+    elif analyst_data["triggered"] and analyst_data["side"] != "neutral" and analyst_data["side"] != _dir_prefix2:
+        penalty = round(analyst_weight * 0.4)
+        raw_score = max(0, raw_score - penalty)
+        breakdown["analyst_revisions"] = -penalty
+    else:
+        breakdown["analyst_revisions"] = 0
+
+    # ── Weekly trend (multi-timeframe, Mode B soft booster) ────────────────
+    # +10 when daily direction aligns with weekly trend (×strength)
+    # −15 when daily direction is counter-trend to weekly (×strength)
+    #   0 when weekly is neutral
+    direction_final = _determine_direction(technicals, sentiment)
+    weekly_data = {"trend": "neutral", "strength": 0.0, "summary": ""}
+    try:
+        # Reuse the daily OHLCV we already have — avoids a second API call
+        weekly_data = get_weekly_trend(ticker, ohlcv_df=ohlcv_df)
+    except Exception as e:
+        print(f"[scorer] weekly_trend fetch failed for {ticker}: {e}")
+    weekly_mod = weekly_modifier(direction_final, weekly_data["trend"], weekly_data["strength"])
+    if weekly_mod != 0:
+        raw_score = max(0, raw_score + weekly_mod)
+        breakdown["weekly_trend"] = weekly_mod
+        # Only surface in signals list if it's a meaningful aligned bonus —
+        # we don't want "weekly bearish, you traded against it" cluttering picks
+        if weekly_mod > 0 and weekly_data["summary"]:
+            signals_triggered.append(weekly_data["summary"])
+        elif weekly_mod < 0 and weekly_data["summary"]:
+            signals_triggered.append(f"⚠ counter-trend: {weekly_data['summary']}")
+    else:
+        breakdown["weekly_trend"] = 0
+
+    # ── Sector momentum (sector ETF above 50MA, no extra API call) ─────────
+    # Soft +5 bonus only — no penalty. Weak-sector winners are still possible.
+    sector_data = {"triggered": False, "sector_etf": None, "summary": ""}
+    try:
+        sector_data = get_sector_momentum(ticker)
+    except Exception as e:
+        print(f"[scorer] sector_momentum fetch failed for {ticker}: {e}")
+    if sector_data["triggered"] and direction_final == "bullish":
+        raw_score += SECTOR_MOMENTUM_BONUS
+        breakdown["sector_momentum"] = SECTOR_MOMENTUM_BONUS
+        if sector_data["summary"]:
+            signals_triggered.append(sector_data["summary"])
+    else:
+        breakdown["sector_momentum"] = 0
+
     raw_score  = min(raw_score, 100)   # hard cap — weights can exceed 100 with bonuses
-    direction  = _determine_direction(technicals, sentiment)
+    direction  = direction_final
     duration   = _determine_duration(technicals, earnings_days)
     confidence = _determine_confidence(raw_score)
 
@@ -182,6 +271,14 @@ def score_ticker(
         "earnings_days":      earnings_days,
         "pattern":            pattern_name,
         "pattern_side":       pattern_side,
+        "insider_net":        insider_data.get("net_dollar", 0.0),
+        "insider_side":       insider_data.get("side", "neutral"),
+        "analyst_net":        analyst_data.get("net", 0),
+        "analyst_side":       analyst_data.get("side", "neutral"),
+        "weekly_trend":       weekly_data.get("trend", "neutral"),
+        "weekly_mod":         weekly_mod,
+        "sector_etf":         sector_data.get("sector_etf"),
+        "sector_momentum_on": sector_data.get("triggered", False),
     }
 
 
