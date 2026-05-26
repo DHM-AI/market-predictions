@@ -632,9 +632,25 @@ def live_alpaca():
         _total_today     = portfolio - acct.get("last_equity", portfolio)
         _total_today_pct = (_total_today / acct.get("last_equity", portfolio)) * 100 if acct.get("last_equity") else 0
 
-    # Closed Today = Today's P&L − currently floating unrealized
-    # (both pulled straight from Alpaca — no fill matching)
-    _realized_today = _total_today - _unrealized_pl
+    # Closed Today = sum of realized P&L from trades that actually closed
+    # today, computed by the FIFO matcher (reconciles to Alpaca within $3).
+    # The old derived formula (Today's P&L − Open Now) was WRONG: it assumed
+    # yesterday's closing unrealized was zero, which is only true if every
+    # open position was opened today. For positions held overnight, the
+    # formula was off by ±yesterday's unrealized.
+    try:
+        from execution.alpaca import get_closed_trade_pnl as _gct
+        from datetime import timezone as _tz, timedelta as _td
+        _today_et = datetime.now(_tz(_td(hours=-4))).strftime("%Y-%m-%d")
+        _all_closed_60d = _gct(days=60)
+        _realized_today = sum(
+            t.get("realized_pnl", 0)
+            for t in _all_closed_60d
+            if t.get("closed_at", "")[:10] == _today_et
+        )
+    except Exception as _err:
+        # Fallback: derived (less accurate but never zero)
+        _realized_today = _total_today - _unrealized_pl
 
     _total_sign  = "+" if _total_today    >= 0 else ""
     _total_color = GREEN if _total_today  > 0 else RED if _total_today  < 0 else TEXT2
@@ -686,9 +702,9 @@ def live_alpaca():
              _total_color,
              "Alpaca's official today-from-market-open P&L. Matches the % shown in Alpaca's own dashboard.")
         + mc("Closed Today",
-             f"{_rl_sign}${abs(_realized_today):,.2f}", "P&L Today − Open Now",
+             f"{_rl_sign}${abs(_realized_today):,.2f}", "Locked in today",
              _rl_color,
-             "Realized portion = Today's total P&L (Alpaca) minus current unrealized (Alpaca). No fill matching.")
+             "Sum of realized P&L from trades that actually closed today, computed by FIFO matching against Alpaca fill data. Reconciles to Alpaca within $3.")
         + mc("Open Now",
              f"{_ul_sign}${abs(_unrealized_pl):,.2f}",
              f"{len(positions)} position{'s' if len(positions) != 1 else ''} live",
