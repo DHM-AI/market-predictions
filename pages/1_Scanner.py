@@ -1306,49 +1306,147 @@ else:
 
 # (Positions are now inside live_alpaca() fragment above — auto-refreshes every 30s)
 
-# ── CHART ─────────────────────────────────────────────────────────────────────
+# ── CHART + ANY-TICKER SEARCH ─────────────────────────────────────────────────
+st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+st.markdown(f'<div class="sec">Price Chart &amp; Ticker Analysis</div>', unsafe_allow_html=True)
+
+# Build dropdown options from today's picks + a "Search any ticker" sentinel
+_picks_tickers = []
 if picks_df is not None and not picks_df.empty:
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    st.markdown(f'<div class="sec">Price Chart &amp; Bollinger Bands</div>', unsafe_allow_html=True)
-    sorted_df = picks_df.sort_values("score", ascending=False)
-    sel = st.selectbox("Select ticker to chart", sorted_df["ticker"].tolist(), label_visibility="collapsed")
-    if sel:
-        try:
-            from data.fetcher import get_ohlcv
-            from ta.volatility import BollingerBands as BB
-            df_c = get_ohlcv(sel, period="6mo")
-            if not df_c.empty:
-                _bb = BB(df_c["Close"], window=20, window_dev=2)
-                fig = go.Figure()
-                try:
-                    fig.add_trace(go.Scatter(x=df_c.index, y=_bb.bollinger_hband(),
-                        line=dict(color="rgba(0,212,255,0.2)", width=1), showlegend=False, name="BB Upper"))
-                    fig.add_trace(go.Scatter(x=df_c.index, y=_bb.bollinger_lband(),
-                        line=dict(color="rgba(0,212,255,0.2)", width=1),
-                        fill="tonexty", fillcolor="rgba(0,212,255,0.04)", showlegend=False, name="BB Lower"))
-                except Exception:
-                    pass
-                row_d  = sorted_df[sorted_df["ticker"]==sel].iloc[0]
-                direct = row_d.get("direction","mixed")
-                acc2   = GREEN if direct=="bullish" else RED if direct=="bearish" else AMBER
-                fig.add_trace(go.Candlestick(
-                    x=df_c.index, open=df_c["Open"], high=df_c["High"],
-                    low=df_c["Low"], close=df_c["Close"], name=sel,
-                    increasing=dict(line=dict(color=GREEN, width=1.2), fillcolor="rgba(0,255,136,0.2)"),
-                    decreasing=dict(line=dict(color=RED,   width=1.2), fillcolor="rgba(255,45,120,0.2)")))
-                fig.update_layout(
-                    xaxis_rangeslider_visible=False, height=360,
-                    paper_bgcolor=SURF, plot_bgcolor=SURF,
-                    xaxis=dict(gridcolor="rgba(0,180,255,0.06)", tickfont=dict(color=TEXT2, size=10)),
-                    yaxis=dict(gridcolor="rgba(0,180,255,0.06)", tickfont=dict(color=TEXT2, size=10), side="right"),
-                    margin=dict(l=0, r=52, t=28, b=0),
-                    title=dict(
-                        text=f"<b style='color:{acc2}'>{sel}</b>"
-                             f"<span style='color:{TEXT2};font-size:12px;'>  ·  6-Month  ·  Bollinger Bands  ·  Score {float(row_d.get('score',0)):.0f}/100</span>",
-                        font=dict(color=TEXT, size=13), x=0.01))
-                st.plotly_chart(fig, use_container_width=True)
-        except Exception as e:
-            st.markdown(f'<div style="color:{TEXT2};padding:20px;text-align:center;font-size:12px;">Chart unavailable: {e}</div>', unsafe_allow_html=True)
+    _picks_tickers = picks_df.sort_values("score", ascending=False)["ticker"].tolist()
+
+_search_col, _input_col = st.columns([1, 3])
+with _search_col:
+    _mode = st.radio(
+        "Source",
+        ["Today's setups", "Search any stock"],
+        horizontal=False,
+        label_visibility="collapsed",
+        index=0 if _picks_tickers else 1,
+    )
+
+sel = None
+with _input_col:
+    if _mode == "Today's setups" and _picks_tickers:
+        sel = st.selectbox(
+            "Pick a setup",
+            _picks_tickers,
+            label_visibility="collapsed",
+        )
+    else:
+        _raw = st.text_input(
+            "Enter any ticker (e.g. QQQ, AAPL, NVDA, BTC-USD)",
+            placeholder="Type a ticker symbol and press Enter…",
+            label_visibility="collapsed",
+        )
+        sel = _raw.strip().upper() if _raw else None
+
+if sel:
+    try:
+        from data.fetcher import get_ohlcv
+        from ta.volatility import BollingerBands as BB
+        df_c = get_ohlcv(sel, period="6mo")
+        if df_c is None or df_c.empty:
+            st.markdown(
+                f'<div style="color:{AMBER};padding:16px;text-align:center;'
+                f'background:{SURF};border:1px solid rgba(255,170,0,0.2);'
+                f'border-radius:8px;">Ticker <b>{sel}</b> not found on yfinance — '
+                f'check the symbol and try again.</div>',
+                unsafe_allow_html=True)
+        else:
+            _bb = BB(df_c["Close"], window=20, window_dev=2)
+            fig = go.Figure()
+            try:
+                fig.add_trace(go.Scatter(x=df_c.index, y=_bb.bollinger_hband(),
+                    line=dict(color="rgba(0,212,255,0.2)", width=1), showlegend=False, name="BB Upper"))
+                fig.add_trace(go.Scatter(x=df_c.index, y=_bb.bollinger_lband(),
+                    line=dict(color="rgba(0,212,255,0.2)", width=1),
+                    fill="tonexty", fillcolor="rgba(0,212,255,0.04)", showlegend=False, name="BB Lower"))
+            except Exception:
+                pass
+
+            # Try to find this ticker in today's predictions for score color
+            _score_val = 0.0
+            _direct    = "mixed"
+            if picks_df is not None and not picks_df.empty:
+                _match = picks_df[picks_df["ticker"] == sel]
+                if not _match.empty:
+                    _score_val = float(_match.iloc[0].get("score", 0))
+                    _direct    = _match.iloc[0].get("direction", "mixed")
+            acc2 = GREEN if _direct == "bullish" else RED if _direct == "bearish" else GLOW
+
+            fig.add_trace(go.Candlestick(
+                x=df_c.index, open=df_c["Open"], high=df_c["High"],
+                low=df_c["Low"], close=df_c["Close"], name=sel,
+                increasing=dict(line=dict(color=GREEN, width=1.2), fillcolor="rgba(0,255,136,0.2)"),
+                decreasing=dict(line=dict(color=RED,   width=1.2), fillcolor="rgba(255,45,120,0.2)")))
+            _title_score = f"  ·  Score {_score_val:.0f}/100" if _score_val else "  ·  Not in today's scan"
+            fig.update_layout(
+                xaxis_rangeslider_visible=False, height=360,
+                paper_bgcolor=SURF, plot_bgcolor=SURF,
+                xaxis=dict(gridcolor="rgba(0,180,255,0.06)", tickfont=dict(color=TEXT2, size=10)),
+                yaxis=dict(gridcolor="rgba(0,180,255,0.06)", tickfont=dict(color=TEXT2, size=10), side="right"),
+                margin=dict(l=0, r=52, t=28, b=0),
+                title=dict(
+                    text=f"<b style='color:{acc2}'>{sel}</b>"
+                         f"<span style='color:{TEXT2};font-size:12px;'>  ·  6-Month  ·  Bollinger Bands{_title_score}</span>",
+                    font=dict(color=TEXT, size=13), x=0.01))
+            st.plotly_chart(fig, use_container_width=True)
+
+            # ── On-demand AI analysis (works on ANY ticker) ─────────────
+            _ai_col1, _ai_col2 = st.columns([1, 4])
+            with _ai_col1:
+                _ai_clicked = st.button(
+                    "✦  Analyze this stock",
+                    type="primary", use_container_width=True,
+                    key=f"ai_{sel}",
+                )
+            if _ai_clicked:
+                with st.spinner(f"Scoring {sel} and asking Claude…"):
+                    try:
+                        from signals.scorer import score_ticker
+                        from data.fetcher import get_earnings_days
+                        _earnings = None
+                        try:
+                            _earnings = get_earnings_days(sel)
+                        except Exception:
+                            pass
+                        _scored = score_ticker(sel, df_c, sentiment=None,
+                                                earnings_days=_earnings)
+                        # Bullet summary of signals before Claude analysis
+                        _sigs   = _scored.get("signals_triggered", []) or []
+                        _score  = float(_scored.get("score", 0))
+                        _dirn   = _scored.get("direction", "mixed")
+                        _color  = GREEN if _dirn == "bullish" else RED if _dirn == "bearish" else AMBER
+                        st.markdown(
+                            f'<div style="background:{SURF};border:1px solid {_color}55;'
+                            f'border-radius:8px;padding:14px 18px;margin-bottom:8px;">'
+                            f'<span style="font-size:11px;font-weight:700;letter-spacing:1px;'
+                            f'text-transform:uppercase;color:{TEXT3};">Quick Score</span><br>'
+                            f'<span style="font-family:JetBrains Mono,monospace;font-size:24px;'
+                            f'font-weight:700;color:{_color};">{_score:.0f}/100</span> '
+                            f'<span style="font-size:13px;color:{TEXT2};margin-left:8px;">{_dirn.upper()}</span>'
+                            f'<div style="font-size:12px;color:{TEXT2};margin-top:8px;">'
+                            f'Signals triggered: {", ".join(_sigs) if _sigs else "none"}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True)
+                        # Claude streaming analysis
+                        try:
+                            from analyst.claude_analyst import stream_explanation
+                            _scored.setdefault("ticker", sel)
+                            st.markdown(
+                                f'<div style="background:{SURF};border:1px solid rgba(0,212,255,0.18);'
+                                f'border-radius:8px;padding:18px;color:{TEXT};">'
+                                f'<span style="font-size:11px;font-weight:700;letter-spacing:1px;'
+                                f'text-transform:uppercase;color:{GLOW};">✦ Claude Analysis</span></div>',
+                                unsafe_allow_html=True)
+                            st.write_stream(stream_explanation(_scored))
+                        except Exception as ce:
+                            st.info(f"Claude analysis unavailable ({ce}). Score above is from the same model used for daily scans.")
+                    except Exception as e:
+                        st.error(f"Analysis failed: {e}")
+    except Exception as e:
+        st.markdown(f'<div style="color:{TEXT2};padding:20px;text-align:center;font-size:12px;">Chart unavailable: {e}</div>', unsafe_allow_html=True)
 
 # ── TRADE HISTORY ──────────────────────────────────────────────────────────────
 # Closed trade history — uses module-level cache so we don't hit Alpaca twice
