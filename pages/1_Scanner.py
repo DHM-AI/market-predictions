@@ -638,18 +638,29 @@ def live_alpaca():
     # yesterday's closing unrealized was zero, which is only true if every
     # open position was opened today. For positions held overnight, the
     # formula was off by ±yesterday's unrealized.
+    _today_wins_sum   = 0.0   # sum of positive realized_pnl from today's closes
+    _today_losses_sum = 0.0   # sum of negative realized_pnl from today's closes
+    _today_wins_n     = 0
+    _today_losses_n   = 0
     try:
         from execution.alpaca import get_closed_trade_pnl as _gct
         from datetime import timezone as _tz, timedelta as _td
         _today_et = datetime.now(_tz(_td(hours=-4))).strftime("%Y-%m-%d")
         _all_closed_60d = _gct(days=60)
-        _realized_today = sum(
-            t.get("realized_pnl", 0)
-            for t in _all_closed_60d
+        _today_trades = [
+            t for t in _all_closed_60d
             if t.get("closed_at", "")[:10] == _today_et
-        )
+        ]
+        _realized_today = sum(t.get("realized_pnl", 0) for t in _today_trades)
+        for _t in _today_trades:
+            _pnl = _t.get("realized_pnl", 0)
+            if _pnl > 0:
+                _today_wins_sum += _pnl
+                _today_wins_n   += 1
+            elif _pnl < 0:
+                _today_losses_sum += _pnl
+                _today_losses_n   += 1
     except Exception as _err:
-        # Fallback: derived (less accurate but never zero)
         _realized_today = _total_today - _unrealized_pl
 
     _total_sign  = "+" if _total_today    >= 0 else ""
@@ -698,9 +709,13 @@ def live_alpaca():
              "Total P&L minus current open unrealized = real money locked in from every closed trade since the account started. Pure Alpaca, no fill matching.")
         + mc("P&L Today",
              f"{_tot_sign}${abs(_total_today):,.2f}",
-             f"{_tot_sign}{abs(_total_today_pct):.2f}% · from Alpaca",
+             (f'{_tot_sign}{abs(_total_today_pct):.2f}% · '
+              f'<span style="color:{GREEN};font-weight:700;">W +${_today_wins_sum:,.0f}</span> '
+              f'<span style="color:{TEXT3};">({_today_wins_n})</span> · '
+              f'<span style="color:{RED};font-weight:700;">L -${abs(_today_losses_sum):,.0f}</span> '
+              f'<span style="color:{TEXT3};">({_today_losses_n})</span>'),
              _total_color,
-             "Alpaca's official today-from-market-open P&L. Matches the % shown in Alpaca's own dashboard.")
+             "Alpaca's today-from-market-open P&L. Wins/Losses breakdown from FIFO-matched fills closed today (W=winners, L=losers).")
         + mc("Closed Today",
              f"{_rl_sign}${abs(_realized_today):,.2f}", "Locked in today",
              _rl_color,
