@@ -1432,17 +1432,29 @@ def live_goal_bar():
     portfolio_val  = st.session_state.get("_portfolio_value", BANKROLL)
     target_dollars = portfolio_val * MONTHLY_TARGET_PCT
 
-    # Monthly realized P&L — sum closed trades for current month from Alpaca history
-    _current_month = today_g.strftime("%Y-%m")
-    realized_pl = sum(
-        cp["realized_pnl"]
-        for cp in _alpaca_closed
-        if str(cp.get("closed_at", "")).startswith(_current_month)
-    )
-
-    # Unrealized — live from fragment (updates every 30s)
+    # ── PULL MONTHLY P&L STRAIGHT FROM ALPACA — NO LOCAL MATCHING ──
+    # Monthly TOTAL P&L = equity now − equity at start of current month
+    # (uses Alpaca's portfolio_history API — same source as "P&L Today")
     unrealized_pl = st.session_state.get("_live_pl", 0.0)
-    total_pl_goal = realized_pl + unrealized_pl
+    try:
+        from alpaca.trading.requests import GetPortfolioHistoryRequest as _GPH
+        from execution.alpaca import _get_client as _ac
+        _month_start = today_g.replace(day=1).strftime("%Y-%m-%d")
+        _hist_m = _ac().get_portfolio_history(
+            _GPH(date_start=_month_start, timeframe="1D"))
+        _eq_arr = [v for v in (_hist_m.equity or []) if v and v > 0]
+        if len(_eq_arr) >= 2:
+            _month_start_equity = float(_eq_arr[0])
+            total_pl_goal       = portfolio_val - _month_start_equity
+        else:
+            # First day of month — use today's P&L
+            total_pl_goal = unrealized_pl
+    except Exception:
+        # Fallback: alltime since account started this month
+        total_pl_goal = portfolio_val - st.session_state.get("account_start_equity", portfolio_val)
+
+    # Realized = Monthly Total − currently floating unrealized (both Alpaca-direct)
+    realized_pl = total_pl_goal - unrealized_pl
 
     realized_pct   = max(0, min(100, realized_pl   / target_dollars * 100)) if target_dollars else 0
     unrealized_pct = max(0, min(100 - realized_pct, unrealized_pl / target_dollars * 100)) if target_dollars else 0
