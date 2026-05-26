@@ -612,13 +612,22 @@ def live_alpaca():
     _last_equity    = acct.get("last_equity", portfolio)
     _total_today    = portfolio - _last_equity
     _unrealized_pl  = total_pl
-    _realized_today = _total_today - _unrealized_pl   # trades closed today only
     _total_sign     = "+" if _total_today >= 0 else ""
     _total_color    = GREEN if _total_today > 0 else RED if _total_today < 0 else TEXT2
-    _rl_color       = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
     _ul_color       = GREEN if _unrealized_pl  > 0 else RED if _unrealized_pl  < 0 else TEXT2
-    _rl_sign        = "+" if _realized_today >= 0 else ""
     _ul_sign        = "+" if _unrealized_pl  >= 0 else ""
+
+    # Closed Today — sum actual closed trade P&L from Alpaca activity (days=1)
+    # The derived formula (_total_today - _unrealized_pl) is wrong because it
+    # ignores yesterday's carried-over unrealized P&L, producing misleading negatives.
+    try:
+        from execution.alpaca import get_closed_trade_pnl as _gct
+        _closed_trades_today = _gct(days=1)
+        _realized_today = sum(t.get("realized_pnl", 0) for t in _closed_trades_today)
+    except Exception:
+        _realized_today = 0
+    _rl_color = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
+    _rl_sign  = "+" if _realized_today >= 0 else ""
 
     _tot_sign  = "+" if _total_today >= 0 else ""
 
@@ -1071,87 +1080,101 @@ with left:
         _visible_tickers = tuple(sorted_df["ticker"].tolist())
         _cnames = _get_company_names(_visible_tickers)
 
-        chunks = [sorted_df.iloc[i:i+3] for i in range(0, len(sorted_df), 3)]
-        for chunk in chunks:
-            cols = st.columns(3)
-            for ci, (_, row) in enumerate(chunk.iterrows()):
-                ticker = row.get("ticker","")
-                score  = float(row.get("score",0))
-                direct = row.get("direction","mixed")
-                dur    = row.get("duration","—")
-                kelly  = float(row.get("dollar_amount",0) or 0)
-                auto   = score >= 70 and alpaca_ok
+        # Show top 12 inline; remaining in a scrollable expander
+        _CARD_LIMIT = 12
+        _top_df  = sorted_df.iloc[:_CARD_LIMIT]
+        _rest_df = sorted_df.iloc[_CARD_LIMIT:]
 
-                if direct == "bullish":
-                    acc, ab, abrd, alabel = GREEN, "rgba(0,255,136,0.12)", "rgba(0,255,136,0.35)", "BUY LONG"
-                elif direct == "bearish":
-                    acc, ab, abrd, alabel = RED,   "rgba(255,45,120,0.12)", "rgba(255,45,120,0.35)", "SELL SHORT"
-                else:
-                    acc, ab, abrd, alabel = AMBER, "rgba(255,170,0,0.10)",  "rgba(255,170,0,0.30)",  "WATCH"
+        def _render_chunk_rows(df_to_render):
+            """Render trade cards in rows of 3."""
+            _chunks = [df_to_render.iloc[i:i+3] for i in range(0, len(df_to_render), 3)]
+            for chunk in _chunks:
+                cols = st.columns(3)
+                for ci, (_, row) in enumerate(chunk.iterrows()):
+                    ticker = row.get("ticker","")
+                    score  = float(row.get("score",0))
+                    direct = row.get("direction","mixed")
+                    dur    = row.get("duration","—")
+                    kelly  = float(row.get("dollar_amount",0) or 0)
+                    auto   = score >= 70 and alpaca_ok
 
-                # Calculate position size if not stored
-                if kelly == 0:
-                    try:
-                        from config import BANKROLL, MAX_POSITION_PCT, KELLY_FRACTION, KELLY_WIN_PCT, KELLY_LOSS_PCT
-                        win_p = min(0.75, max(0.35, score / 100 * 0.5 + 0.25))
-                        b     = KELLY_WIN_PCT / KELLY_LOSS_PCT
-                        f     = max(0, (win_p * b - (1 - win_p)) / b)
-                        kelly = round(min(BANKROLL * f * KELLY_FRACTION, BANKROLL * MAX_POSITION_PCT) / 100) * 100
-                    except Exception:
-                        kelly = 0
+                    if direct == "bullish":
+                        acc, ab, abrd, alabel = GREEN, "rgba(0,255,136,0.12)", "rgba(0,255,136,0.35)", "BUY LONG"
+                    elif direct == "bearish":
+                        acc, ab, abrd, alabel = RED,   "rgba(255,45,120,0.12)", "rgba(255,45,120,0.35)", "SELL SHORT"
+                    else:
+                        acc, ab, abrd, alabel = AMBER, "rgba(255,170,0,0.10)",  "rgba(255,170,0,0.30)",  "WATCH"
 
-                tip    = tooltip_content(row)
-                rea    = plain_reason(row)
-                ks     = f"${kelly:,.0f}" if kelly else "Calculating..."
-                cname  = _cnames.get(ticker, "")
+                    if kelly == 0:
+                        try:
+                            from config import BANKROLL, MAX_POSITION_PCT, KELLY_FRACTION, KELLY_WIN_PCT, KELLY_LOSS_PCT
+                            win_p = min(0.75, max(0.35, score / 100 * 0.5 + 0.25))
+                            b     = KELLY_WIN_PCT / KELLY_LOSS_PCT
+                            f     = max(0, (win_p * b - (1 - win_p)) / b)
+                            kelly = round(min(BANKROLL * f * KELLY_FRACTION, BANKROLL * MAX_POSITION_PCT) / 100) * 100
+                        except Exception:
+                            kelly = 0
 
-                # Escape user data — build fragments separately (no nested f-strings)
-                safe_cname = _html.escape(cname)
-                safe_rea   = _html.escape(rea)
-                safe_dur   = _html.escape(str(dur))
+                    tip    = tooltip_content(row)
+                    rea    = plain_reason(row)
+                    ks     = f"${kelly:,.0f}" if kelly else "Calculating..."
+                    cname  = _cnames.get(ticker, "")
 
-                cname_html = (
-                    '<div style="font-size:10px;color:' + TEXT3 +
-                    ';margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">' +
-                    safe_cname + '</div>'
-                ) if safe_cname else ''
+                    safe_cname = _html.escape(cname)
+                    safe_rea   = _html.escape(rea)
+                    safe_dur   = _html.escape(str(dur))
 
-                auto_html = (
-                    "<span class='auto-yes'>&#9889; AUTO-EXECUTING</span>"
-                    if auto else
-                    "<span class='auto-no'>Manual &middot; score &lt; 70</span>"
-                )
+                    cname_html = (
+                        '<div style="font-size:10px;color:' + TEXT3 +
+                        ';margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">' +
+                        safe_cname + '</div>'
+                    ) if safe_cname else ''
 
-                card = "".join([
-                    f'<div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">',
-                    f'<div class="tip">{tip}</div>',
-                    '<span class="c c-tl"></span><span class="c c-tr"></span>',
-                    '<span class="c c-bl"></span><span class="c c-br"></span>',
-                    '<div style="display:flex;justify-content:space-between;'
-                    'align-items:flex-start;margin-bottom:10px;"><div>',
-                    f'<div class="card-ticker" style="color:{acc};'
-                    f'text-shadow:0 0 18px {acc}44;">{ticker}</div>',
-                    cname_html,
-                    f'<div class="card-action" style="background:{ab};'
-                    f'border:1px solid {abrd};color:{acc};">{alabel}</div>',
-                    f'<div style="font-size:10px;color:{TEXT2};'
-                    f'margin-top:4px;">{safe_dur}</div>',
-                    '</div>',
-                    ring(score, acc),
-                    '</div>',
-                    '<div class="card-div"></div>',
-                    f'<div class="stars" style="color:{acc};">{stars(score)}</div>',
-                    f'<div class="card-reason">{safe_rea}</div>',
-                    '<div class="card-footer"><div>',
-                    '<div class="card-pos-lbl">Position Size</div>',
-                    f'<div class="card-pos" style="color:{acc};">{ks}</div>',
-                    '</div>',
-                    auto_html,
-                    '</div></div>',
-                ])
-                with cols[ci]:
-                    st.markdown(card, unsafe_allow_html=True)
-            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                    auto_html = (
+                        "<span class='auto-yes'>&#9889; AUTO-EXECUTING</span>"
+                        if auto else
+                        "<span class='auto-no'>Manual &middot; score &lt; 70</span>"
+                    )
+
+                    card = "".join([
+                        f'<div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">',
+                        f'<div class="tip">{tip}</div>',
+                        '<span class="c c-tl"></span><span class="c c-tr"></span>',
+                        '<span class="c c-bl"></span><span class="c c-br"></span>',
+                        '<div style="display:flex;justify-content:space-between;'
+                        'align-items:flex-start;margin-bottom:10px;"><div>',
+                        f'<div class="card-ticker" style="color:{acc};'
+                        f'text-shadow:0 0 18px {acc}44;">{ticker}</div>',
+                        cname_html,
+                        f'<div class="card-action" style="background:{ab};'
+                        f'border:1px solid {abrd};color:{acc};">{alabel}</div>',
+                        f'<div style="font-size:10px;color:{TEXT2};'
+                        f'margin-top:4px;">{safe_dur}</div>',
+                        '</div>',
+                        ring(score, acc),
+                        '</div>',
+                        '<div class="card-div"></div>',
+                        f'<div class="stars" style="color:{acc};">{stars(score)}</div>',
+                        f'<div class="card-reason">{safe_rea}</div>',
+                        '<div class="card-footer"><div>',
+                        '<div class="card-pos-lbl">Position Size</div>',
+                        f'<div class="card-pos" style="color:{acc};">{ks}</div>',
+                        '</div>',
+                        auto_html,
+                        '</div></div>',
+                    ])
+                    with cols[ci]:
+                        st.markdown(card, unsafe_allow_html=True)
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        # Render top 12
+        _render_chunk_rows(_top_df)
+
+        # Remaining setups in a collapsible expander
+        if not _rest_df.empty:
+            _remaining = len(_rest_df)
+            with st.expander(f"▼  Show {_remaining} more setups (scroll inside)"):
+                _render_chunk_rows(_rest_df)
     else:
         _is_weekend = datetime.today().weekday() >= 5
         _wait_msg   = ("Markets are closed on weekends — showing last available trading day data." if _is_weekend
