@@ -1050,175 +1050,180 @@ def live_alpaca():
 live_alpaca()
 
 # ── MAIN CONTENT ──────────────────────────────────────────────────────────────
-left, right = st.columns([3, 1], gap="large")
 
-with right:
-    # ── Agent status ──────────────────────────────────────────────────────────
-    st.markdown(f'<div class="sec">Agent Status</div>', unsafe_allow_html=True)
-    status_items = [
-        (GREEN if last_scan else TEXT3, "Scan", f"Last run {last_scan}" if last_scan else "No scan today yet"),
-        (GREEN if db_ok else RED,       "DB",   "Supabase connected" if db_ok else "Database offline"),
-        (GREEN if alpaca_ok else RED,   "Alpaca", "API connected" if alpaca_ok else "Not configured"),
-        (AMBER, "Next Scan", _next_scan_label()),
-    ]
-    items_html = ""
-    for color, label, val in status_items:
-        items_html += (
-            f'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,180,255,0.06);">'
-            f'<div style="width:7px;height:7px;border-radius:50%;background:{color};box-shadow:0 0 6px {color};flex-shrink:0;"></div>'
-            f'<div>'
-            f'<div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:{TEXT3};">{label}</div>'
-            f'<div style="font-size:12px;color:{TEXT};font-family:JetBrains Mono,monospace;">{val}</div>'
-            f'</div></div>'
+# ── Horizontal Agent Status + Recent Trades bar (compact, no wasted vertical space) ──
+_status_items = [
+    (GREEN if last_scan else TEXT3, "Scan",     f"Last run {last_scan}" if last_scan else "No scan today yet"),
+    (GREEN if db_ok else RED,       "DB",       "Supabase connected" if db_ok else "Database offline"),
+    (GREEN if alpaca_ok else RED,   "Alpaca",   "API connected" if alpaca_ok else "Not configured"),
+    (AMBER,                         "Next Scan", _next_scan_label()),
+]
+_status_html = ""
+for _color, _lbl, _val in _status_items:
+    _status_html += (
+        f'<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:170px;padding:0 12px;'
+        f'border-right:1px solid rgba(0,180,255,0.08);">'
+        f'<div style="width:8px;height:8px;border-radius:50%;background:{_color};'
+        f'box-shadow:0 0 8px {_color};flex-shrink:0;"></div>'
+        f'<div style="line-height:1.3;overflow:hidden;">'
+        f'<div style="font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:{TEXT3};">{_lbl}</div>'
+        f'<div style="font-size:12px;color:{TEXT};font-family:JetBrains Mono,monospace;'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_val}</div>'
+        f'</div></div>'
+    )
+
+# Recent trades inline (horizontal scrolling pills)
+_trades_html = ""
+if trades:
+    for _t in trades[:10]:
+        _side = _t.get("side", "")
+        _c    = GREEN if _side == "buy" else RED
+        _ts   = str(_t.get("timestamp", ""))[11:16]
+        _amt  = float(_t.get("dollar_amount", 0))
+        _trades_html += (
+            f'<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;'
+            f'background:rgba(0,180,255,0.04);border:1px solid rgba(0,180,255,0.1);'
+            f'border-radius:6px;white-space:nowrap;font-size:11px;">'
+            f'<span style="color:{TEXT3};font-family:JetBrains Mono,monospace;">{_ts}</span>'
+            f'<span style="color:{_c};font-weight:700;font-family:JetBrains Mono,monospace;">{_t.get("ticker","")}</span>'
+            f'<span style="color:{TEXT2};">{_side.upper()}</span>'
+            f'<span style="color:{TEXT};font-family:JetBrains Mono,monospace;">${_amt:,.0f}</span>'
+            f'</div>'
         )
-    st.markdown(f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;padding:12px 14px;">{items_html}</div>', unsafe_allow_html=True)
+else:
+    _trades_html = f'<div style="color:{TEXT3};font-size:11px;padding:6px 12px;">No trades yet</div>'
 
-    # ── Recent trade log ──────────────────────────────────────────────────────
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    st.markdown(f'<div class="sec">Recent Trades</div>', unsafe_allow_html=True)
-    if trades:
-        log_html = ""
-        for t in trades[:8]:
-            side  = t.get("side","")
-            c     = GREEN if side=="buy" else RED
-            ts    = str(t.get("timestamp",""))[:16]
-            amt   = float(t.get("dollar_amount", 0))
-            log_html += (
-                f'<div class="log-item">'
-                f'<div class="log-dot" style="background:{c};box-shadow:0 0 5px {c};"></div>'
-                f'<div class="log-time">{ts[11:16]}</div>'
-                f'<div class="log-text">'
-                f'<span style="color:{c};font-weight:700;font-family:JetBrains Mono,monospace;">{t.get("ticker","")}</span>'
-                f' {side.upper()} ${amt:,.0f}'
-                f'<div style="color:{TEXT3};font-size:10px;">{str(t.get("reason",""))[:60]}</div>'
-                f'</div></div>'
-            )
-        st.markdown(f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;padding:12px 14px;max-height:320px;overflow-y:auto;">{log_html}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div style="background:{SURF};border:1px solid rgba(0,180,255,0.1);border-radius:8px;padding:20px 14px;text-align:center;"><div style="color:{TEXT3};font-size:12px;">No trades executed yet.<br>Trades appear here after auto-execution.</div></div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div style="display:flex;gap:0;background:{SURF};border:1px solid rgba(0,180,255,0.12);'
+    f'border-radius:8px;padding:10px 6px;margin-bottom:14px;align-items:center;">'
+    f'<div style="display:flex;flex:0 0 auto;align-items:center;">'
+    f'<div style="padding:0 14px;font-size:9px;font-weight:700;letter-spacing:1.5px;'
+    f'text-transform:uppercase;color:{GLOW};white-space:nowrap;">AGENTS</div>'
+    f'{_status_html}'
+    f'</div>'
+    f'<div style="padding:0 14px;font-size:9px;font-weight:700;letter-spacing:1.5px;'
+    f'text-transform:uppercase;color:{GLOW};white-space:nowrap;border-left:1px solid rgba(0,180,255,0.12);">RECENT</div>'
+    f'<div style="display:flex;gap:6px;overflow-x:auto;flex:1;min-width:0;padding:0 4px;">'
+    f'{_trades_html}'
+    f'</div>'
+    f'</div>',
+    unsafe_allow_html=True
+)
 
-with left:
-    st.markdown(
-        f'<div class="sec">Today\'s Trade Recommendations <span class="sec-n">{n_picks} setups</span></div>',
-        unsafe_allow_html=True)
+# ── Trade recommendations (full width, scrollable container) ──
+st.markdown(
+    f'<div class="sec">Today\'s Trade Recommendations <span class="sec-n">{n_picks} setups</span></div>',
+    unsafe_allow_html=True)
 
-    if picks_df is not None and not picks_df.empty:
-        sorted_df = picks_df[
-            (picks_df["direction"] != "mixed") &
-            (picks_df["score"] >= 70)
-        ].sort_values("score", ascending=False)
+if picks_df is not None and not picks_df.empty:
+    sorted_df = picks_df[
+        (picks_df["direction"] != "mixed") &
+        (picks_df["score"] >= 70)
+    ].sort_values("score", ascending=False)
 
-        # Pre-fetch company names — uses module-level cached function
-        _visible_tickers = tuple(sorted_df["ticker"].tolist())
-        _cnames = _get_company_names(_visible_tickers)
+    # Pre-fetch company names — uses module-level cached function
+    _visible_tickers = tuple(sorted_df["ticker"].tolist())
+    _cnames = _get_company_names(_visible_tickers)
 
-        # Show top 12 inline; remaining in a scrollable expander
-        _CARD_LIMIT = 12
-        _top_df  = sorted_df.iloc[:_CARD_LIMIT]
-        _rest_df = sorted_df.iloc[_CARD_LIMIT:]
+    # All cards in one scrollable container — 3 rows visible, scroll for the rest
 
-        def _render_chunk_rows(df_to_render):
-            """Render trade cards in rows of 3."""
-            _chunks = [df_to_render.iloc[i:i+3] for i in range(0, len(df_to_render), 3)]
-            for chunk in _chunks:
-                cols = st.columns(3)
-                for ci, (_, row) in enumerate(chunk.iterrows()):
-                    ticker = row.get("ticker","")
-                    score  = float(row.get("score",0))
-                    direct = row.get("direction","mixed")
-                    dur    = row.get("duration","—")
-                    kelly  = float(row.get("dollar_amount",0) or 0)
-                    auto   = score >= 70 and alpaca_ok
+    def _render_chunk_rows(df_to_render):
+        """Render trade cards in rows of 3."""
+        _chunks = [df_to_render.iloc[i:i+3] for i in range(0, len(df_to_render), 3)]
+        for chunk in _chunks:
+            cols = st.columns(3)
+            for ci, (_, row) in enumerate(chunk.iterrows()):
+                ticker = row.get("ticker","")
+                score  = float(row.get("score",0))
+                direct = row.get("direction","mixed")
+                dur    = row.get("duration","—")
+                kelly  = float(row.get("dollar_amount",0) or 0)
+                auto   = score >= 70 and alpaca_ok
 
-                    if direct == "bullish":
-                        acc, ab, abrd, alabel = GREEN, "rgba(0,255,136,0.12)", "rgba(0,255,136,0.35)", "BUY LONG"
-                    elif direct == "bearish":
-                        acc, ab, abrd, alabel = RED,   "rgba(255,45,120,0.12)", "rgba(255,45,120,0.35)", "SELL SHORT"
-                    else:
-                        acc, ab, abrd, alabel = AMBER, "rgba(255,170,0,0.10)",  "rgba(255,170,0,0.30)",  "WATCH"
+                if direct == "bullish":
+                    acc, ab, abrd, alabel = GREEN, "rgba(0,255,136,0.12)", "rgba(0,255,136,0.35)", "BUY LONG"
+                elif direct == "bearish":
+                    acc, ab, abrd, alabel = RED,   "rgba(255,45,120,0.12)", "rgba(255,45,120,0.35)", "SELL SHORT"
+                else:
+                    acc, ab, abrd, alabel = AMBER, "rgba(255,170,0,0.10)",  "rgba(255,170,0,0.30)",  "WATCH"
 
-                    if kelly == 0:
-                        try:
-                            from config import BANKROLL, MAX_POSITION_PCT, KELLY_FRACTION, KELLY_WIN_PCT, KELLY_LOSS_PCT
-                            win_p = min(0.75, max(0.35, score / 100 * 0.5 + 0.25))
-                            b     = KELLY_WIN_PCT / KELLY_LOSS_PCT
-                            f     = max(0, (win_p * b - (1 - win_p)) / b)
-                            kelly = round(min(BANKROLL * f * KELLY_FRACTION, BANKROLL * MAX_POSITION_PCT) / 100) * 100
-                        except Exception:
-                            kelly = 0
+                if kelly == 0:
+                    try:
+                        from config import BANKROLL, MAX_POSITION_PCT, KELLY_FRACTION, KELLY_WIN_PCT, KELLY_LOSS_PCT
+                        win_p = min(0.75, max(0.35, score / 100 * 0.5 + 0.25))
+                        b     = KELLY_WIN_PCT / KELLY_LOSS_PCT
+                        f     = max(0, (win_p * b - (1 - win_p)) / b)
+                        kelly = round(min(BANKROLL * f * KELLY_FRACTION, BANKROLL * MAX_POSITION_PCT) / 100) * 100
+                    except Exception:
+                        kelly = 0
 
-                    tip    = tooltip_content(row)
-                    rea    = plain_reason(row)
-                    ks     = f"${kelly:,.0f}" if kelly else "Calculating..."
-                    cname  = _cnames.get(ticker, "")
+                tip    = tooltip_content(row)
+                rea    = plain_reason(row)
+                ks     = f"${kelly:,.0f}" if kelly else "Calculating..."
+                cname  = _cnames.get(ticker, "")
 
-                    safe_cname = _html.escape(cname)
-                    safe_rea   = _html.escape(rea)
-                    safe_dur   = _html.escape(str(dur))
+                safe_cname = _html.escape(cname)
+                safe_rea   = _html.escape(rea)
+                safe_dur   = _html.escape(str(dur))
 
-                    cname_html = (
-                        '<div style="font-size:10px;color:' + TEXT3 +
-                        ';margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">' +
-                        safe_cname + '</div>'
-                    ) if safe_cname else ''
+                cname_html = (
+                    '<div style="font-size:10px;color:' + TEXT3 +
+                    ';margin-top:1px;margin-bottom:4px;letter-spacing:0.3px;">' +
+                    safe_cname + '</div>'
+                ) if safe_cname else ''
 
-                    auto_html = (
-                        "<span class='auto-yes'>&#9889; AUTO-EXECUTING</span>"
-                        if auto else
-                        "<span class='auto-no'>Manual &middot; score &lt; 70</span>"
-                    )
+                auto_html = (
+                    "<span class='auto-yes'>&#9889; AUTO-EXECUTING</span>"
+                    if auto else
+                    "<span class='auto-no'>Manual &middot; score &lt; 70</span>"
+                )
 
-                    card = "".join([
-                        f'<div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">',
-                        f'<div class="tip">{tip}</div>',
-                        '<span class="c c-tl"></span><span class="c c-tr"></span>',
-                        '<span class="c c-bl"></span><span class="c c-br"></span>',
-                        '<div style="display:flex;justify-content:space-between;'
-                        'align-items:flex-start;margin-bottom:10px;"><div>',
-                        f'<div class="card-ticker" style="color:{acc};'
-                        f'text-shadow:0 0 18px {acc}44;">{ticker}</div>',
-                        cname_html,
-                        f'<div class="card-action" style="background:{ab};'
-                        f'border:1px solid {abrd};color:{acc};">{alabel}</div>',
-                        f'<div style="font-size:10px;color:{TEXT2};'
-                        f'margin-top:4px;">{safe_dur}</div>',
-                        '</div>',
-                        ring(score, acc),
-                        '</div>',
-                        '<div class="card-div"></div>',
-                        f'<div class="stars" style="color:{acc};">{stars(score)}</div>',
-                        f'<div class="card-reason">{safe_rea}</div>',
-                        '<div class="card-footer"><div>',
-                        '<div class="card-pos-lbl">Position Size</div>',
-                        f'<div class="card-pos" style="color:{acc};">{ks}</div>',
-                        '</div>',
-                        auto_html,
-                        '</div></div>',
-                    ])
-                    with cols[ci]:
-                        st.markdown(card, unsafe_allow_html=True)
-                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                card = "".join([
+                    f'<div class="trade-card tt" style="--acc:{acc};--acc2:{acc}33;">',
+                    f'<div class="tip">{tip}</div>',
+                    '<span class="c c-tl"></span><span class="c c-tr"></span>',
+                    '<span class="c c-bl"></span><span class="c c-br"></span>',
+                    '<div style="display:flex;justify-content:space-between;'
+                    'align-items:flex-start;margin-bottom:10px;"><div>',
+                    f'<div class="card-ticker" style="color:{acc};'
+                    f'text-shadow:0 0 18px {acc}44;">{ticker}</div>',
+                    cname_html,
+                    f'<div class="card-action" style="background:{ab};'
+                    f'border:1px solid {abrd};color:{acc};">{alabel}</div>',
+                    f'<div style="font-size:10px;color:{TEXT2};'
+                    f'margin-top:4px;">{safe_dur}</div>',
+                    '</div>',
+                    ring(score, acc),
+                    '</div>',
+                    '<div class="card-div"></div>',
+                    f'<div class="stars" style="color:{acc};">{stars(score)}</div>',
+                    f'<div class="card-reason">{safe_rea}</div>',
+                    '<div class="card-footer"><div>',
+                    '<div class="card-pos-lbl">Position Size</div>',
+                    f'<div class="card-pos" style="color:{acc};">{ks}</div>',
+                    '</div>',
+                    auto_html,
+                    '</div></div>',
+                ])
+                with cols[ci]:
+                    st.markdown(card, unsafe_allow_html=True)
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-        # Render top 12
-        _render_chunk_rows(_top_df)
-
-        # Remaining setups in a collapsible expander
-        if not _rest_df.empty:
-            _remaining = len(_rest_df)
-            with st.expander(f"▼  Show {_remaining} more setups (scroll inside)"):
-                _render_chunk_rows(_rest_df)
-    else:
-        _is_weekend = datetime.today().weekday() >= 5
-        _wait_msg   = ("Markets are closed on weekends — showing last available trading day data." if _is_weekend
-                       else "The AI agent runs automatically every weekday at <strong style='color:{GLOW};'>12× daily starting 7:00 AM ET</strong>.<br>Hit <strong style='color:{TEXT};'>⟳ Refresh Dashboard</strong> to check for new results.")
-        st.markdown(f"""
-        <div class="waiting">
-          <div class="wait-ring"></div>
-          <div style="font-size:15px;font-weight:600;color:{TEXT};margin-bottom:6px;">
-            {"Weekend — market closed" if _is_weekend else "Waiting for today's scan"}
-          </div>
-          <div style="font-size:12px;color:{TEXT2};line-height:1.8;">{_wait_msg}</div>
-        </div>""", unsafe_allow_html=True)
+    # Scrollable container — 3 rows visible (~880px), scroll inside for the rest
+    with st.container(height=880, border=False):
+        _render_chunk_rows(sorted_df)
+else:
+    _is_weekend = datetime.today().weekday() >= 5
+    _wait_msg   = ("Markets are closed on weekends — showing last available trading day data." if _is_weekend
+                   else "The AI agent runs automatically every weekday at <strong style='color:{GLOW};'>12× daily starting 7:00 AM ET</strong>.<br>Hit <strong style='color:{TEXT};'>⟳ Refresh Dashboard</strong> to check for new results.")
+    st.markdown(f"""
+    <div class="waiting">
+      <div class="wait-ring"></div>
+      <div style="font-size:15px;font-weight:600;color:{TEXT};margin-bottom:6px;">
+        {"Weekend — market closed" if _is_weekend else "Waiting for today's scan"}
+      </div>
+      <div style="font-size:12px;color:{TEXT2};line-height:1.8;">{_wait_msg}</div>
+    </div>""", unsafe_allow_html=True)
 
 # (Positions are now inside live_alpaca() fragment above — auto-refreshes every 30s)
 
