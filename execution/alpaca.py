@@ -786,14 +786,6 @@ def trail_positions(
                     """Inner helper — fire one partial exit tier."""
                     nonlocal _abs_qty
                     import math as _math
-                    # Detect non-fractionable assets — must use whole shares
-                    is_fractionable = True
-                    try:
-                        _asset = client.get_asset(ticker)
-                        is_fractionable = bool(getattr(_asset, "fractionable", True))
-                    except Exception:
-                        # If qty is already whole, assume non-fractionable safe
-                        is_fractionable = (abs(_abs_qty - round(_abs_qty)) > 1e-6)
 
                     # qty to close = 33% of ORIGINAL position
                     if tier_name == "t1":
@@ -801,11 +793,17 @@ def trail_positions(
                     else:
                         raw_qty = _hist.get("t1_qty", 0) or (_abs_qty * fraction_to_close)
                         raw_qty = min(raw_qty, _abs_qty)
-                    # Floor to whole shares for non-fractionable assets
-                    close_qty = _math.floor(raw_qty) if not is_fractionable else round(raw_qty, 4)
+
+                    # ALWAYS floor to whole shares — cleaner orders, no Alpaca
+                    # complaints on non-fractionable assets, no weird .05 / .79
+                    # share displays in Slack alerts. The dropped fractional part
+                    # rides with the trailing stop alongside the remaining 34%.
+                    close_qty  = int(_math.floor(raw_qty))
                     if close_qty <= 0:
                         return None
-                    remain_qty = round(_abs_qty - close_qty, 4) if is_fractionable else int(_abs_qty - close_qty)
+                    # Remaining can still be fractional if the position was opened
+                    # that way (fractional buy) — that's fine for the stop order.
+                    remain_qty = round(_abs_qty - close_qty, 4)
                     exit_side  = OrderSide.SELL if is_long else OrderSide.BUY
 
                     # ── Snapshot existing stops BEFORE cancelling — so we can
