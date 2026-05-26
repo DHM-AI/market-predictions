@@ -608,35 +608,36 @@ def live_alpaca():
             f'{tip_html}</div>'
         )
 
-    # True daily P&L = Alpaca equity vs yesterday's close
-    _last_equity    = acct.get("last_equity", portfolio)
-    _total_today    = portfolio - _last_equity
-    _unrealized_pl  = total_pl
-    _total_sign     = "+" if _total_today >= 0 else ""
-    _total_color    = GREEN if _total_today > 0 else RED if _total_today < 0 else TEXT2
-    _ul_color       = GREEN if _unrealized_pl  > 0 else RED if _unrealized_pl  < 0 else TEXT2
-    _ul_sign        = "+" if _unrealized_pl  >= 0 else ""
+    # ── ALL P&L NUMBERS COME STRAIGHT FROM ALPACA — NO LOCAL MATH ──
+    # P&L Today = Alpaca's portfolio_history(period='1D').profit_loss[-1]
+    #   This is THE number Alpaca shows as "Today's Gain" in their own app.
+    # Open Now = sum of position.unrealized_pl from Alpaca positions endpoint.
+    # Closed Today = P&L Today minus Open Now (the only derived value, but
+    #   both inputs are direct from Alpaca — no fill matching, no guessing).
+    _unrealized_pl = total_pl  # from get_positions() → sums Alpaca's position.unrealized_pl
 
-    # Closed Today — sum realized P&L for trades CLOSED today (ET).
-    # CRITICAL: must fetch a wide lookback (60 days) so the matcher can pair
-    # today's SELLs against BUYs from days/weeks ago. Then filter for today's
-    # date. Using days=1 misses positions opened earlier than yesterday.
     try:
-        from execution.alpaca import get_closed_trade_pnl as _gct
-        from datetime import timezone as _tz, timedelta as _td
-        _today_et = datetime.now(_tz(_td(hours=-4))).strftime("%Y-%m-%d")
-        _all_closed = _gct(days=60)
-        _closed_today_filtered = [
-            t for t in _all_closed
-            if t.get("closed_at", "")[:10] == _today_et
-        ]
-        _realized_today = sum(t.get("realized_pnl", 0) for t in _closed_today_filtered)
+        from alpaca.trading.requests import GetPortfolioHistoryRequest as _GPH
+        _hist_today = _get_client().get_portfolio_history(
+            _GPH(period="1D", timeframe="1H"))
+        # Alpaca's authoritative today-from-market-open P&L
+        _pl_arr = [v for v in (_hist_today.profit_loss or []) if v is not None]
+        _total_today = float(_pl_arr[-1]) if _pl_arr else (portfolio - acct.get("last_equity", portfolio))
     except Exception:
-        _realized_today = 0
-    _rl_color = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
-    _rl_sign  = "+" if _realized_today >= 0 else ""
+        # Fallback: simple equity diff (still Alpaca-direct)
+        _total_today = portfolio - acct.get("last_equity", portfolio)
 
-    _tot_sign  = "+" if _total_today >= 0 else ""
+    # Closed Today = Today's P&L − currently floating unrealized
+    # (both pulled straight from Alpaca — no fill matching)
+    _realized_today = _total_today - _unrealized_pl
+
+    _total_sign  = "+" if _total_today    >= 0 else ""
+    _total_color = GREEN if _total_today  > 0 else RED if _total_today  < 0 else TEXT2
+    _ul_color    = GREEN if _unrealized_pl > 0 else RED if _unrealized_pl < 0 else TEXT2
+    _ul_sign     = "+" if _unrealized_pl  >= 0 else ""
+    _rl_color    = GREEN if _realized_today > 0 else RED if _realized_today < 0 else TEXT2
+    _rl_sign     = "+" if _realized_today  >= 0 else ""
+    _tot_sign    = _total_sign
 
     # All-time P&L = portfolio vs actual account starting equity (from Alpaca history)
     # Cached in session state — only fetched once per session to avoid API overhead
@@ -665,18 +666,18 @@ def live_alpaca():
              _alltime_color,
              f"All-time profit vs starting equity of ${_start_equity:,.0f} (from Alpaca history).")
         + mc("P&L Today",
-             f"{_tot_sign}${abs(_total_today):,.2f}", "Closed + open combined",
+             f"{_tot_sign}${abs(_total_today):,.2f}", "Direct from Alpaca",
              _total_color,
-             "Today's total P&L: closed trades + floating unrealized.")
+             "Alpaca's official today-from-market-open P&L (portfolio_history API). Same number Alpaca shows in their app.")
         + mc("Closed Today",
-             f"{_rl_sign}${abs(_realized_today):,.2f}", "Locked in",
+             f"{_rl_sign}${abs(_realized_today):,.2f}", "P&L Today − Open Now",
              _rl_color,
-             "Realized P&L from trades closed today only. Resets each morning.")
+             "Realized portion = Today's total P&L (Alpaca) minus current unrealized (Alpaca). No fill matching.")
         + mc("Open Now",
              f"{_ul_sign}${abs(_unrealized_pl):,.2f}",
              f"{len(positions)} position{'s' if len(positions) != 1 else ''} live",
              _ul_color,
-             "Floating P&L on all currently open positions. Updates every 30s.")
+             "Sum of position.unrealized_pl direct from Alpaca positions endpoint.")
         + mc("Buying Power",
              f"${buying_power:,.0f}", "Available now",
              TEXT, "Cash available for new positions right now.")
