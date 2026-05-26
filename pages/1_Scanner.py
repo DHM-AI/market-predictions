@@ -8,6 +8,56 @@ import html as _html
 st.set_page_config(page_title="Illuminati", page_icon="🔺", layout="wide",
                    initial_sidebar_state="collapsed")
 
+# ── INSTANT LOADING SHELL ──────────────────────────────────────────────────────
+# Renders the moment Streamlit reads this file — before any data is fetched.
+# Hides the default Streamlit sidebar/header and shows a branded loader so the
+# user never sees a black blank screen during the 5-10s of initial Alpaca calls.
+# The loader has a `data-loading` body class that we'll flip off at the end
+# of the script via JS (auto-hides when content has rendered below).
+st.markdown("""
+<style>
+  /* Force-hide Streamlit chrome (the page-nav sidebar can't be respected by
+     initial_sidebar_state on first load, so we kill it with CSS) */
+  [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
+  [data-testid="stHeader"], #MainMenu, footer { display: none !important; }
+  [data-testid="collapsedControl"] { display: none !important; }
+
+  /* Boot loader — only visible while #illuminati-boot exists */
+  #illuminati-boot {
+    position: fixed; inset: 0; z-index: 99999;
+    background: #03060d;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 20px;
+    animation: bootFadeOut 0.6s ease 1.5s forwards;
+  }
+  #illuminati-boot .ring {
+    width: 56px; height: 56px; border-radius: 50%;
+    border: 2px solid rgba(0,212,255,0.12);
+    border-top-color: #00d4ff;
+    animation: bootSpin 0.9s linear infinite;
+    box-shadow: 0 0 50px rgba(0,212,255,0.4);
+  }
+  #illuminati-boot .text {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px; font-weight: 700; letter-spacing: 5px;
+    color: #00d4ff; text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(0,212,255,0.6);
+  }
+  #illuminati-boot .sub {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 10px; letter-spacing: 1.5px;
+    color: rgba(168,180,204,0.6); margin-top: -4px;
+  }
+  @keyframes bootSpin    { to { transform: rotate(360deg); } }
+  @keyframes bootFadeOut { to { opacity: 0; visibility: hidden; } }
+</style>
+<div id="illuminati-boot">
+  <div class="ring"></div>
+  <div class="text">ILLUMINATI</div>
+  <div class="sub">Connecting to Alpaca · Loading positions · Reading market</div>
+</div>
+""", unsafe_allow_html=True)
+
 
 # ── Company name lookup — module-level so @st.cache_data works properly ────────
 # Defined here (not inside fragments) so Streamlit can cache across reruns.
