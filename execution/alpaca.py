@@ -844,6 +844,93 @@ def trail_positions(
             ticker_orders = orders_by_ticker.get(ticker, [])
             pct_gain_decimal = pct_gain / 100.0
 
+            # ══════════════════════════════════════════════════════════════════
+            # RULE: every position MUST have a stop, ALWAYS.
+            # Runs BEFORE partial-exit / trailing logic so naked LOSING positions
+            # get rescued too (those don't qualify for any other branch).
+            # ══════════════════════════════════════════════════════════════════
+            _has_stop = any(
+                "stop" in str(getattr(o, "type", "")).lower()
+                for o in ticker_orders
+            )
+            if not _has_stop:
+                _entry_px = float(p.get("avg_entry_price", 0) or 0)
+                _cur_px   = float(p.get("current_price", _entry_px))
+                if _entry_px > 0 and _cur_px > 0 and qty > 0:
+                    # Constraint:
+                    #   LONG  → stop MUST be BELOW current price
+                    #   SHORT → stop MUST be ABOVE current price
+                    # For positions still in profit (or near entry), use the
+                    # tighter of (entry-based 3% risk) and (current ±3%).
+                    # For positions already underwater past the entry stop,
+                    # the entry-based stop is invalid (wrong side of current);
+                    # cap loss from CURRENT price instead.
+                    if is_long:
+                        risk_stop = round(_entry_px * (1 - KELLY_LOSS_PCT), 2)
+                        cur_stop  = round(_cur_px   * (1 - KELLY_LOSS_PCT), 2)
+                        if risk_stop < _cur_px:
+                            # Entry-based stop still valid — use tighter of the two
+                            new_stop = max(risk_stop, cur_stop)
+                        else:
+                            # Already underwater past entry stop → cap from current
+                            new_stop = cur_stop
+                        stop_side = OrderSide.SELL
+                    else:
+                        risk_stop = round(_entry_px * (1 + KELLY_LOSS_PCT), 2)
+                        cur_stop  = round(_cur_px   * (1 + KELLY_LOSS_PCT), 2)
+                        if risk_stop > _cur_px:
+                            new_stop = min(risk_stop, cur_stop)
+                        else:
+                            new_stop = cur_stop
+                        stop_side = OrderSide.BUY
+                    try:
+                        from alpaca.trading.requests import StopOrderRequest as _SOR
+                        _rescue_req = _SOR(
+                            symbol=ticker, qty=qty, side=stop_side,
+                            stop_price=new_stop, time_in_force=TimeInForce.GTC,
+                        )
+                        try:
+                            _rescue_ord = client.submit_order(_rescue_req)
+                        except Exception:
+                            _rescue_req.time_in_force = TimeInForce.DAY
+                            _rescue_ord = client.submit_order(_rescue_req)
+                        print(f"[AEGIS] {ticker} was NAKED — placed rescue stop @ ${new_stop:.2f}")
+                        results.append({
+                            "ticker": ticker, "pct_gain": round(pct_gain, 2),
+                            "trail_pct": KELLY_LOSS_PCT, "order_id": str(_rescue_ord.id),
+                            "cancelled_sl": 0, "status": "rescue_stop_placed",
+                            "timestamp": datetime.now().isoformat(),
+                        })
+                        # Slack ping — naked positions are a safety incident
+                        try:
+                            from alerts.slack import _post
+                            _post({"text": (
+                                f"🩹 *Naked position rescued — {ticker}*\n"
+                                f">{('LONG' if is_long else 'SHORT')} {qty:g} @ avg ${_entry_px:.2f} · "
+                                f"current ${_cur_px:.2f} · P&L {pct_gain:+.1f}%\n"
+                                f">Placed rescue stop @ ${new_stop:.2f} "
+                                f"({KELLY_LOSS_PCT*100:.0f}% risk cap from "
+                                f"{'entry' if new_stop == risk_stop else 'current price'})"
+                            )})
+                        except Exception:
+                            pass
+                        # Re-fetch this ticker's orders so subsequent logic sees the rescue stop
+                        ticker_orders = ticker_orders + [_rescue_ord]
+                    except Exception as _re:
+                        print(f"[AEGIS] {ticker} naked-rescue FAILED: {_re}")
+                        # Even louder Slack — couldn't place a stop, requires human
+                        try:
+                            from alerts.slack import _post
+                            _post({"text": (
+                                f"🚨 *NAKED POSITION — could not place stop: {ticker}*\n"
+                                f">{('LONG' if is_long else 'SHORT')} {qty:g} @ ${_entry_px:.2f}\n"
+                                f">Error: {str(_re)[:200]}\n"
+                                f">*Action required:* manually place a stop or close the position."
+                            )})
+                        except Exception:
+                            pass
+            # ══════════════════════════════════════════════════════════════════
+
             # ── Two-tier partial exit (scale-out) ─────────────────────────────
             # Tier 1 at +7%:  close 33% of ORIGINAL, move stop to breakeven
             # Tier 2 at +12%: close another 33% (= same qty as T1, so 66% closed)

@@ -1,0 +1,41 @@
+name: Cleanup Stale Orders
+
+# Cancels any LIMIT pending order older than 8 hours, BEFORE market open.
+# Prevents stale after-hours signals from firing at the next open when the
+# market may have moved enough that the trade no longer makes sense.
+#
+# Runs 9:25 AM ET weekdays (5 min before the open during EDT = 13:25 UTC).
+# Stops, trailing stops, and bracket children are never touched — only
+# top-level LIMIT entry orders.
+
+on:
+  schedule:
+    - cron: '25 13 * * 1-5'   # 9:25 AM ET (EDT)
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+      ALPACA_BASE_URL:    ${{ secrets.ALPACA_BASE_URL }}
+      ALPACA_LIVE_MODE:   ${{ secrets.ALPACA_LIVE_MODE }}
+      SLACK_WEBHOOK_URL:  ${{ secrets.SLACK_WEBHOOK_URL }}
+      CLEANUP_STALE_HOURS: "8"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-agent.txt
+
+      - name: Cleanup stale orders
+        run: python -m cleanup_stale_orders
