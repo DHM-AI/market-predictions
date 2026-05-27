@@ -44,15 +44,28 @@ def _client():
 
 # ── CRUD ──────────────────────────────────────────────────────────────────
 
-def create_alert(ticker: str, target: float, direction: str = "above",
-                 note: str = "") -> dict:
-    """Create a new price alert. Returns the inserted row."""
-    direction = direction.lower().strip()
+def create_alert(ticker: str, target: float | None = None,
+                 direction: str | None = "above", note: str = "") -> dict:
+    """
+    Create a new price alert OR a watch-only entry.
+    - target=None → watch-only: ticker is added to scan universe but no
+      price-cross ping ever fires. direction is ignored.
+    - target=float → full price alert with direction=above/below.
+    """
+    ticker = ticker.upper().strip()
+    if target is None:
+        row = {"ticker": ticker, "target": None, "direction": None,
+               "note": note or "", "fired": False}
+        res = _client().table("price_alerts").insert(row).execute()
+        inserted = res.data[0] if res.data else row
+        print(f"[price-alerts] Created watch-only: {inserted['ticker']}")
+        return inserted
+
+    direction = (direction or "above").lower().strip()
     if direction not in ("above", "below"):
         raise ValueError("direction must be 'above' or 'below'")
-
     row = {
-        "ticker":    ticker.upper().strip(),
+        "ticker":    ticker,
         "target":    float(target),
         "direction": direction,
         "note":      note or "",
@@ -165,6 +178,10 @@ def check_and_fire_alerts() -> int:
         price = price_map.get(tk)
         if price is None:
             continue
+        # Watch-only entries: target/direction NULL → in scan universe but
+        # never fires a price-cross alert
+        if a.get("target") is None or a.get("direction") is None:
+            continue
         target = float(a["target"])
         triggered = (
             (a["direction"] == "above" and price >= target)
@@ -210,10 +227,16 @@ def _cli():
         return 0
 
     if cmd == "add":
-        if len(sys.argv) < 4:
-            print("add requires: TICKER PRICE [above|below] [note]")
+        if len(sys.argv) < 3:
+            print("add requires: TICKER [PRICE [above|below] [note]]")
+            print("  - TICKER alone → watch-only (added to scan universe)")
+            print("  - TICKER PRICE [above|below] → full price alert")
             return 1
         ticker = sys.argv[2]
+        if len(sys.argv) < 4:
+            # Watch-only — just ticker, no target
+            create_alert(ticker)
+            return 0
         price = float(sys.argv[3])
         direction = sys.argv[4] if len(sys.argv) > 4 else "above"
         note = " ".join(sys.argv[5:]) if len(sys.argv) > 5 else ""
