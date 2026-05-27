@@ -24,13 +24,30 @@ _SCHEMA_COLS = {
 
 
 def get_client() -> Client:
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_KEY", "")
+    """
+    Build a Supabase client. Prefers SUPABASE_SERVICE_KEY (admin, bypasses RLS)
+    over the anon-level SUPABASE_KEY. The service key is server-side ONLY —
+    never expose it to a browser.
+
+    Why both? During the transition we keep accepting the anon key as fallback
+    so nothing breaks if SUPABASE_SERVICE_KEY isn't set yet.
+    """
+    url     = os.environ.get("SUPABASE_URL", "")
+    service = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    anon    = os.environ.get("SUPABASE_KEY", "")
+    key     = service or anon
+
     if not url or not key:
         raise RuntimeError(
-            "SUPABASE_URL and SUPABASE_KEY must be set in environment or .env"
+            "SUPABASE_URL plus one of (SUPABASE_SERVICE_KEY, SUPABASE_KEY) "
+            "must be set in environment or .env"
         )
     return create_client(url, key)
+
+
+def _using_service_key() -> bool:
+    """Returns True iff the service-role key is in use (writes will bypass RLS)."""
+    return bool(os.environ.get("SUPABASE_SERVICE_KEY", ""))
 
 
 # Streamlit-cached version (avoids reconnecting on every rerender)
