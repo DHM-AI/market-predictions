@@ -837,7 +837,7 @@ def trail_positions(
         for p in positions:
             ticker   = p["ticker"]
             pct_gain = p.get("unrealized_pl_pct", 0)  # already in %
-            qty      = p["qty"]
+            qty      = abs(float(p["qty"]))  # shorts come through as negative
             raw_side = str(p.get("side", "")).lower()
             is_long  = "long" in raw_side or "buy" in raw_side
 
@@ -1033,9 +1033,13 @@ def trail_positions(
                     continue  # remaining qty gets trailing stop next AEGIS run
             # ── End partial exit ──────────────────────────────────────────────
 
-            # Only handle longs for trailing stop (shorts need inverted logic)
-            if not is_long:
-                continue
+            # Handle BOTH longs and shorts.
+            # For a SHORT position that's profitable (price has gone DOWN),
+            # the trailing stop is a BUY order (to cover) that trails DOWN
+            # behind the price. Alpaca's TrailingStopOrderRequest figures
+            # out the direction from the order side + trail_percent; we just
+            # need to pass the right side (BUY to cover a short).
+            trail_side = OrderSide.SELL if is_long else OrderSide.BUY
 
             # Not profitable enough yet for trailing stop
             if pct_gain < trigger * 100:
@@ -1090,7 +1094,7 @@ def trail_positions(
                         trail_req = TrailingStopOrderRequest(
                             symbol        = ticker,
                             qty           = qty,
-                            side          = OrderSide.SELL,
+                            side          = trail_side,   # SELL for longs, BUY to cover shorts
                             time_in_force = tif,
                             trail_percent = trail_pct_val,
                         )
@@ -1136,14 +1140,21 @@ def trail_positions(
 
             except Exception as e:
                 # Alpaca won't allow trailing stops on fractional positions.
-                # Simulate trailing: move fixed stop up to 3% below current price.
+                # Simulate trailing: move the fixed stop to lock in profit.
+                # For LONG  → stop is BELOW current, must be ABOVE entry
+                # For SHORT → stop is ABOVE current, must be BELOW entry
                 if "fractional" in str(e).lower():
                     _simulated = False
                     try:
                         current_price = p.get("current_price") or p.get("avg_entry_price", 0)
-                        new_stop = round(current_price * (1 - trail), 2)
                         entry_px  = p.get("avg_entry_price", 0)
-                        if new_stop > entry_px:  # only move stop if it locks in profit
+                        if is_long:
+                            new_stop = round(current_price * (1 - trail), 2)
+                            locks_profit = new_stop > entry_px
+                        else:
+                            new_stop = round(current_price * (1 + trail), 2)
+                            locks_profit = new_stop < entry_px
+                        if locks_profit:
                             # Cancel old stops
                             for o in ticker_orders:
                                 otype = str(getattr(o, "type", "")).lower()
@@ -1152,12 +1163,12 @@ def trail_positions(
                                         client.cancel_order_by_id(str(o.id))
                                     except Exception:
                                         pass
-                            # Place new fixed stop above entry (locking in profit)
+                            # Place new fixed stop that locks in profit
                             from alpaca.trading.requests import StopOrderRequest
                             stop_req = StopOrderRequest(
                                 symbol        = ticker,
                                 qty           = qty,
-                                side          = OrderSide.SELL,
+                                side          = trail_side,   # SELL for longs, BUY for shorts
                                 time_in_force = TimeInForce.GTC,
                                 stop_price    = new_stop,
                             )
