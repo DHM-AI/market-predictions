@@ -834,15 +834,51 @@ def trail_positions(
         for o in open_orders:
             orders_by_ticker.setdefault(o.symbol, []).append(o)
 
+        # Load penny-stock floor — rule: no positions below MIN_STOCK_PRICE
+        try:
+            from config import MIN_STOCK_PRICE as _MIN_PRICE
+        except Exception:
+            _MIN_PRICE = 5.0
+
         for p in positions:
             ticker   = p["ticker"]
             pct_gain = p.get("unrealized_pl_pct", 0)  # already in %
             qty      = abs(float(p["qty"]))  # shorts come through as negative
             raw_side = str(p.get("side", "")).lower()
             is_long  = "long" in raw_side or "buy" in raw_side
+            cur_px   = float(p.get("current_price", 0) or 0)
 
             ticker_orders = orders_by_ticker.get(ticker, [])
             pct_gain_decimal = pct_gain / 100.0
+
+            # ══════════════════════════════════════════════════════════════════
+            # RULE: no penny stocks. If a position drifted below MIN_STOCK_PRICE,
+            # close it at market — wide spreads + thin liquidity are killers.
+            # Runs FIRST so we don't waste an AEGIS cycle placing stops on a
+            # position we're about to close anyway.
+            # ══════════════════════════════════════════════════════════════════
+            if cur_px > 0 and cur_px < _MIN_PRICE:
+                try:
+                    print(f"[AEGIS] {ticker} below ${_MIN_PRICE} floor (cur ${cur_px:.2f}) — auto-closing")
+                    _close_result = close_position(ticker)
+                    results.append({
+                        "ticker": ticker, "pct_gain": round(pct_gain, 2),
+                        "trail_pct": 0, "order_id": "n/a",
+                        "cancelled_sl": 0, "status": "closed_penny_stock",
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    try:
+                        from alerts.slack import _post
+                        _post({"text": (
+                            f"🪙 *Penny-stock auto-close — {ticker}*\n"
+                            f">{('LONG' if is_long else 'SHORT')} {qty:g} @ ${cur_px:.2f} "
+                            f"(below ${_MIN_PRICE:.2f} floor) · P&L {pct_gain:+.1f}%"
+                        )})
+                    except Exception:
+                        pass
+                except Exception as _ce:
+                    print(f"[AEGIS] {ticker} penny-close FAILED: {_ce}")
+                continue   # skip stop / trailing logic — position is closing
 
             # ══════════════════════════════════════════════════════════════════
             # RULE: every position MUST have a stop, ALWAYS.
