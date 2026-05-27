@@ -104,16 +104,65 @@ def is_crypto(ticker: str) -> bool:
     return ticker in CRYPTO_YFINANCE_TICKERS or ticker in CRYPTO_ALPACA_TICKERS
 
 
+def _get_price_alert_tickers() -> list[str]:
+    """
+    Pull active price-alert tickers (where auto_score=true) from Supabase so
+    that anything the user adds to the alerts panel is also scored on every
+    scan. Falls through silently if Supabase isn't reachable.
+
+    Each alert row has an optional `auto_score` boolean — defaults to true.
+    If user wants a "watch only, never score" alert, set auto_score=false.
+    """
+    try:
+        from db import _client
+        client = _client()
+        # Try to filter by auto_score=true. If the column doesn't exist yet
+        # (migration not yet run), fall back to "all unfired alerts".
+        try:
+            res = (client.table("price_alerts")
+                   .select("ticker")
+                   .eq("fired", False)
+                   .eq("auto_score", True)
+                   .execute())
+        except Exception:
+            res = (client.table("price_alerts")
+                   .select("ticker")
+                   .eq("fired", False)
+                   .execute())
+        seen = set()
+        out  = []
+        for row in (res.data or []):
+            t = (row.get("ticker") or "").upper().strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+    except Exception as e:
+        print(f"[universe] Could not pull price-alert tickers: {e}")
+        return []
+
+
 def get_universe() -> list[str]:
     from config import WATCHLIST, ENABLE_CRYPTO, CRYPTO_YFINANCE_TICKERS
-    sp500    = get_sp500_tickers()
-    ipos     = get_recent_ipos()
-    seen     = set(sp500)
-    extras   = []
-    for t in WATCHLIST + ipos:
+    sp500       = get_sp500_tickers()
+    ipos        = get_recent_ipos()
+    alert_picks = _get_price_alert_tickers()
+
+    seen   = set(sp500)
+    extras = []
+    # Order: WATCHLIST → IPOs → price-alert tickers
+    # (alerts come last so they don't displace your explicit watchlist priority)
+    for t in WATCHLIST + ipos + alert_picks:
         if t not in seen:
             extras.append(t)
             seen.add(t)
+
+    if alert_picks:
+        # Count how many alert tickers actually extended the universe
+        new_from_alerts = [t for t in alert_picks if t not in set(sp500) | set(WATCHLIST) | set(ipos)]
+        if new_from_alerts:
+            print(f"[universe] Added {len(new_from_alerts)} ticker(s) from price alerts: {', '.join(new_from_alerts)}")
+
     # Append crypto in yfinance format (BTC-USD etc.) — translated to Alpaca
     # format only at execution time in APEX
     crypto = CRYPTO_YFINANCE_TICKERS if ENABLE_CRYPTO else []
