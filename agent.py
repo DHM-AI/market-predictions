@@ -113,7 +113,23 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
     # even before Alpaca fills propagate back through the API
     _new_positions = 0
     _new_trades    = 0
-    auto_picks = picks_df[picks_df["score"] >= _effective_min_score]
+
+    # ── Auto-execute gate: BOTH score AND confidence must qualify ───────────
+    # Score alone was too permissive — RYOJ scored 78-80 every scan but
+    # confidence was "Low" every time, and we kept buying it into a -$4.2k loss.
+    # Confidence comes from the rule-based scorer (not the XGB+sentiment blend)
+    # so it reflects how many actual signals fire, not just model confidence.
+    _ALLOWED_CONFIDENCE = {"High", "Medium"}
+    score_ok      = picks_df["score"] >= _effective_min_score
+    confidence_ok = picks_df.get("confidence", "Low").isin(_ALLOWED_CONFIDENCE)
+    auto_picks    = picks_df[score_ok & confidence_ok]
+
+    # Log what got dropped by the confidence filter so it's visible in scan output
+    dropped = picks_df[score_ok & ~confidence_ok]
+    if not dropped.empty:
+        print(f"[THEMIS] Skipped {len(dropped)} pick(s) — score≥{_effective_min_score} but Low confidence:")
+        for _, _r in dropped.iterrows():
+            print(f"         · {_r['ticker']:6s}  score={_r['score']:.0f}  dir={_r.get('direction','?')}  conf={_r.get('confidence','?')}")
     for _, row in auto_picks.iterrows():
         ticker    = row["ticker"]
         direction = row.get("direction", "bullish")

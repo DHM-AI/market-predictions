@@ -72,6 +72,34 @@ def check_trade(
     if ticker in tickers_held:
         return False, f"Already holding {ticker} — no duplicate positions"
 
+    # ── Check 1a: Pending order on the same ticker ────────────────────────────
+    # Today's SEGG incident: 5 separate scans each queued a SEGG short because
+    # the duplicate check only looked at FILLED positions, not pending orders.
+    # A pending entry order on this ticker counts as a duplicate too.
+    try:
+        from execution.alpaca import _get_client, is_configured
+        from alpaca.trading.requests import GetOrdersRequest as _GOR2
+        from alpaca.trading.enums import QueryOrderStatus as _QOS2
+        if is_configured():
+            _pending = _get_client().get_orders(
+                _GOR2(status=_QOS2.OPEN, limit=200))
+            for _o in _pending:
+                if _o.symbol != ticker:
+                    continue
+                # Skip protective children (stops/trailing/bracket TPs) —
+                # those don't represent a NEW entry attempt
+                _otype = str(getattr(_o, "type", "")).lower()
+                if "stop" in _otype:
+                    continue
+                if getattr(_o, "parent_order_id", None):
+                    continue
+                return False, (
+                    f"Pending {_o.side} order already queued for {ticker} "
+                    f"(qty {_o.qty}) — no duplicate signals"
+                )
+    except Exception as e:
+        print(f"[THEMIS] Pending-order dedup check failed for {ticker}: {e} — allowing trade")
+
     # ── Check 1b: Recent-loss cooldown ────────────────────────────────────────
     # Prevent "death by a thousand cuts" pattern where same volume/RSI signal
     # keeps firing on a declining stock, system keeps re-buying after each
