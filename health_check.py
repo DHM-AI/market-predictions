@@ -192,12 +192,11 @@ try:
         from alpaca.trading.requests import GetOrdersRequest as _GOR
         from alpaca.trading.enums import QueryOrderStatus as _QOS
         from execution.alpaca import _get_client
+        from execution.alpaca import is_active_order
         _client_inst = _get_client()
         _all_ord = _client_inst.get_orders(_GOR(status=_QOS.ALL, limit=400))
-        _active  = {"orderstatus.open","orderstatus.new","orderstatus.held",
-                    "open","new","held","pending_new","accepted"}
         _stopped = {o.symbol for o in _all_ord
-                    if str(getattr(o,"status","")).lower() in _active
+                    if is_active_order(o)
                     and "stop" in str(getattr(o,"type","")).lower()}
         # alpaca_positions is already a list of dicts from get_positions();
         # use the 'ticker' key (not pos.symbol on a dict)

@@ -64,6 +64,23 @@ def get_account() -> dict:
     }
 
 
+# ── Active order statuses (CRITICAL: covers all SDK string formats) ──────
+# The Alpaca Python SDK can stringify an OrderStatus enum two ways:
+#   "OrderStatus.HELD"  or  "held"
+# Some statuses (ACCEPTED, PENDING_NEW) have bitten us repeatedly when only
+# one form was listed. ALWAYS use this set for "is this order active?".
+ACTIVE_ORDER_STATUSES = {
+    "open", "new", "held", "pending_new", "accepted",
+    "orderstatus.open", "orderstatus.new", "orderstatus.held",
+    "orderstatus.pending_new", "orderstatus.accepted",
+}
+
+
+def is_active_order(o) -> bool:
+    """Single source of truth: is this order currently active (held/open/etc)?"""
+    return str(getattr(o, "status", "")).lower() in ACTIVE_ORDER_STATUSES
+
+
 # Buying power safety factor — leaves headroom for slippage and same-scan orders
 _BP_SAFETY_FACTOR = 0.90
 # In-process cache: once DT-BP is found exhausted, short-circuit the rest of
@@ -404,11 +421,7 @@ def get_positions() -> list[dict]:
         from alpaca.trading.enums import QueryOrderStatus
         # Get ALL active orders (open + held + new + accepted)
         _all = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.ALL, limit=400))
-        _active_statuses = {
-            "orderstatus.open", "orderstatus.new", "orderstatus.held",
-            "open", "new", "held", "pending_new", "accepted",
-        }
-        orders = [o for o in _all if str(getattr(o, "status", "")).lower() in _active_statuses]
+        orders = [o for o in _all if is_active_order(o)]
         sl_tp_map    = {}   # ticker → {stop_loss, take_profit}
         trailing_set = set()  # tickers with an active native trailing stop
         for o in orders:
@@ -623,10 +636,6 @@ def close_position(ticker: str) -> dict:
         client = _get_client()
 
         # Cancel ALL active orders for this ticker (open + held + new + accepted)
-        _active_statuses = {
-            "orderstatus.open", "orderstatus.new", "orderstatus.held",
-            "open", "new", "held", "pending_new", "accepted",
-        }
         try:
             all_orders = client.get_orders(GetOrdersRequest(
                 status=QueryOrderStatus.ALL, limit=400))
@@ -634,7 +643,7 @@ def close_position(ticker: str) -> dict:
             for o in all_orders:
                 if o.symbol != ticker:
                     continue
-                if str(getattr(o, "status", "")).lower() not in _active_statuses:
+                if not is_active_order(o):
                     continue
                 try:
                     client.cancel_order_by_id(str(o.id))
@@ -822,14 +831,7 @@ def trail_positions(
         from alpaca.trading.enums import QueryOrderStatus as _QOS
         _all_active = client.get_orders(
             GetOrdersRequest(status=_QOS.ALL, limit=400))
-        _active_statuses = {
-            "orderstatus.open", "orderstatus.new", "orderstatus.held",
-            "open", "new", "held", "pending_new", "accepted",
-        }
-        open_orders = [
-            o for o in _all_active
-            if str(getattr(o, "status", "")).lower() in _active_statuses
-        ]
+        open_orders = [o for o in _all_active if is_active_order(o)]
         orders_by_ticker: dict = {}
         for o in open_orders:
             orders_by_ticker.setdefault(o.symbol, []).append(o)
@@ -1007,12 +1009,8 @@ def trail_positions(
                     # "stops gone + sell failed = naked position" disaster.
                     _stop_snapshots = []
                     for o in ticker_orders:
-                        otype   = str(getattr(o, "type", "")).lower()
-                        ostatus = str(getattr(o, "status", "")).lower()
-                        if "stop" in otype and ostatus in (
-                                "orderstatus.open", "orderstatus.new",
-                                "orderstatus.held", "open", "new", "held",
-                                "pending_new"):
+                        otype = str(getattr(o, "type", "")).lower()
+                        if "stop" in otype and is_active_order(o):
                             _stop_snapshots.append({
                                 "type":  otype,
                                 "qty":   float(o.qty) if o.qty else _abs_qty,
