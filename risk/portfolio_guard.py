@@ -72,6 +72,52 @@ def check_trade(
     if ticker in tickers_held:
         return False, f"Already holding {ticker} — no duplicate positions"
 
+    # ── Check 1b: Recent-loss cooldown ────────────────────────────────────────
+    # Prevent "death by a thousand cuts" pattern where same volume/RSI signal
+    # keeps firing on a declining stock, system keeps re-buying after each
+    # stop hit. Block re-entry for LOSS_COOLDOWN_HOURS after any loss close.
+    try:
+        from config import LOSS_COOLDOWN_HOURS, LOSS_COOLDOWN_PCT
+        from execution.alpaca import get_closed_trade_pnl
+        recent_closed = get_closed_trade_pnl(days=3)
+        now_ts = datetime.now(timezone.utc)
+        for t in recent_closed:
+            if t.get("ticker") != ticker:
+                continue
+            pnl = t.get("realized_pnl", 0)
+            entry = t.get("entry_price", 0) or 1
+            qty = abs(t.get("qty", 0)) or 1
+            pct_loss = pnl / (entry * qty) if entry * qty else 0
+            if pct_loss >= -LOSS_COOLDOWN_PCT:
+                continue   # not a loss (or too small to count)
+            # Parse close time
+            closed_at = t.get("closed_at", "")
+            try:
+                ct = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            hours_since = (now_ts - ct).total_seconds() / 3600
+            if hours_since < LOSS_COOLDOWN_HOURS:
+                return False, (
+                    f"Loss cooldown on {ticker} — last stop hit "
+                    f"{hours_since:.1f}h ago (${pnl:+,.0f}), "
+                    f"blocking re-entry for {LOSS_COOLDOWN_HOURS}h"
+                )
+    except Exception as e:
+        print(f"[THEMIS] Loss cooldown check failed for {ticker}: {e} — allowing trade")
+
+    # ── Check 1c: Minimum stock price floor ───────────────────────────────────
+    # Sub-$5 stocks have wide spreads and low liquidity — your position size
+    # moves the market against you. Skip them entirely.
+    try:
+        from config import MIN_STOCK_PRICE
+        from execution.alpaca import get_current_price
+        cur_px = get_current_price(ticker)
+        if cur_px is not None and cur_px > 0 and cur_px < MIN_STOCK_PRICE:
+            return False, f"{ticker} below ${MIN_STOCK_PRICE} floor (current ${cur_px:.2f}) — too illiquid"
+    except Exception as e:
+        print(f"[THEMIS] Min-price check failed for {ticker}: {e} — allowing trade")
+
     # ── Check 2: Max concurrent positions ─────────────────────────────────────
     if len(open_positions) >= MAX_OPEN_POSITIONS:
         return False, f"Max {MAX_OPEN_POSITIONS} concurrent positions reached ({len(open_positions)} open)"

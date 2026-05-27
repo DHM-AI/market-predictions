@@ -134,6 +134,18 @@ TRAIL_TIGHTEN_LEVELS = [
 COOLDOWN_WIN_THRESHOLD = 0.05   # block counter-signal if prior close was +5%+
 COOLDOWN_HOURS         = 24     # hours to block counter-direction trades
 
+# Loss cooldown: after stopping out of a name, block re-entry for N hours
+# Prevents "death by a thousand cuts" — same volume/RSI signal keeps firing
+# on a declining stock, system keeps re-buying, each stop loss bleeds capital.
+# Real example: RYOJ on 2026-05-27 — 13 separate stop-outs same day = -$4.2k.
+LOSS_COOLDOWN_PCT      = 0.01   # any close down >1% counts as a stop hit
+LOSS_COOLDOWN_HOURS    = 48     # block re-entry for 2 trading days
+
+# Minimum stock price — penny/low-priced stocks have wide spreads + low
+# liquidity. A $7500 position in a $3 stock = 2500 shares that you can't
+# exit cleanly. Skip them entirely.
+MIN_STOCK_PRICE        = 5.00   # below this → skip the pick
+
 # ── Partial Exit (Two-Tier Scale-Out) ─────────────────────────────────────────
 # THREE-STAGE EXIT STRATEGY:
 #   Tier 1 at +7%:  close 33% of ORIGINAL position, move stop to breakeven
