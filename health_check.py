@@ -191,14 +191,18 @@ try:
         # (queries ALL active orders, not just OPEN — bracket children live in HELD)
         from alpaca.trading.requests import GetOrdersRequest as _GOR
         from alpaca.trading.enums import QueryOrderStatus as _QOS
-        _all_ord = client.get_orders(_GOR(status=_QOS.ALL, limit=400))
+        from execution.alpaca import _get_client
+        _client_inst = _get_client()
+        _all_ord = _client_inst.get_orders(_GOR(status=_QOS.ALL, limit=400))
         _active  = {"orderstatus.open","orderstatus.new","orderstatus.held",
                     "open","new","held","pending_new","accepted"}
         _stopped = {o.symbol for o in _all_ord
                     if str(getattr(o,"status","")).lower() in _active
                     and "stop" in str(getattr(o,"type","")).lower()}
-        naked = [p["symbol"] for p in [{"symbol": pos.symbol} for pos in alpaca_positions]
-                 if p["symbol"] not in _stopped]
+        # alpaca_positions is already a list of dicts from get_positions();
+        # use the 'ticker' key (not pos.symbol on a dict)
+        naked = [p.get("ticker") or p.get("symbol") for p in alpaca_positions
+                 if (p.get("ticker") or p.get("symbol")) not in _stopped]
         if naked:
             report.add("AEGIS — Stop Coverage", "FAIL",
                        f"{len(naked)} position(s) WITHOUT stops: {', '.join(naked[:10])}")
