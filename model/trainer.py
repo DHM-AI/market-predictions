@@ -1,11 +1,15 @@
 from __future__ import annotations
 """
-Train XGBoost classifier on 3 years of S&P 500 history.
+Train XGBoost classifier on 5 years of S&P 500 history + Platt-scaling
+calibration on a held-out slice.
 
 Run once before first agent scan:
     python -m model.trainer
 
-Saves model artifacts to model/saved/.
+Saves model artifacts to model/saved/:
+    - xgb_model.pkl       (the trained classifier)
+    - feature_names.json  (feature order for inference)
+    - calibrator.pkl      (LogisticRegression for Platt scaling)
 """
 import os
 import json
