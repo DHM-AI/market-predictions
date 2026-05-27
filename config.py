@@ -179,7 +179,13 @@ PREDICTIONS_CSV     = "logs/predictions.csv"   # legacy, kept for compat
 MODEL_PATH          = "model/saved/xgb_model.pkl"
 FEATURE_NAMES_PATH  = "model/saved/feature_names.json"
 CALIBRATOR_PATH     = "model/saved/calibrator.pkl"   # Platt scaling on top of XGB
-ENABLE_CALIBRATION  = True                            # set False to bypass and use raw XGB probs
+# Calibration is DISABLED for now — Platt scaling on the extreme class imbalance
+# (~0.47% positive rate) squashes all calibrated probs under 0.30, which would
+# make auto-execute (score ≥ 70) effectively impossible to trigger. The model
+# itself is improved (AUC 0.65 → 0.76) so raw probs are still better than they
+# were before. TODO: try isotonic regression OR oversample positives in the
+# calibration slice, then re-enable.
+ENABLE_CALIBRATION  = False
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 SCAN_TIME_ET = "08:00"
