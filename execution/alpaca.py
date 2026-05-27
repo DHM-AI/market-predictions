@@ -77,11 +77,16 @@ def reset_bp_cache() -> None:
     _dt_bp_exhausted_for_scan = False
 
 
-def _check_buying_power(dollar_amount: float, ticker: str) -> tuple[bool, str]:
+def _check_buying_power(dollar_amount: float, ticker: str,
+                        notify: bool = True) -> tuple[bool, str]:
     """
     Pre-trade DT-BP check. Returns (ok, reason).
     Bracket orders (TimeInForce.DAY) consume daytrading_buying_power.
     Reject early if the trade would exceed 90% of available DT-BP.
+
+    notify: when True (default), posts a Slack alert ONCE per scan when
+            DT-BP first hits exhaustion. Set False from diagnostic/test
+            callers to avoid polluting Slack.
     """
     global _dt_bp_exhausted_for_scan
     if _dt_bp_exhausted_for_scan:
@@ -93,19 +98,20 @@ def _check_buying_power(dollar_amount: float, ticker: str) -> tuple[bool, str]:
         if dollar_amount > usable:
             # Mark exhausted so subsequent orders short-circuit
             _dt_bp_exhausted_for_scan = True
-            # Notify Slack once (not per-ticker spam)
-            try:
-                from alerts.slack import _post
-                _post({
-                    "text": (
-                        f"⚠️ *DT-BP exhausted* — skipping remaining trades this scan\n"
-                        f"> Available: ${dt_bp:,.0f}  ·  Need: ${dollar_amount:,.0f}  ·  "
-                        f"Tried: `{ticker}`\n"
-                        f"> Close some positions or wait until next session."
-                    ),
-                })
-            except Exception:
-                pass
+            # Notify Slack once per process (not per ticker spam, not for tests)
+            if notify:
+                try:
+                    from alerts.slack import _post
+                    _post({
+                        "text": (
+                            f"⚠️ *DT-BP exhausted* — skipping remaining trades this scan\n"
+                            f"> Available: ${dt_bp:,.0f}  ·  Need: ${dollar_amount:,.0f}  ·  "
+                            f"Tried: `{ticker}`\n"
+                            f"> Close some positions or wait until next session."
+                        ),
+                    })
+                except Exception:
+                    pass
             return False, (
                 f"insufficient day-trading buying power "
                 f"(need ${dollar_amount:,.0f}, have ${dt_bp:,.0f}, "
