@@ -78,7 +78,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
                     earnings_map: dict | None = None) -> list[dict]:
     """Auto-execute High-confidence picks via Alpaca (paper by default)."""
     from execution.alpaca import (is_configured, place_order, is_live_mode,
-                                  get_positions, get_account,
+                                  get_positions, get_account, reset_bp_cache,
                                   place_crypto_order, place_iron_butterfly)
     from data.universe import is_crypto
     from config import (CRYPTO_YFINANCE_TO_ALPACA, ENABLE_CRYPTO,
@@ -105,6 +105,10 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
 
     _effective_min_score = min_score if min_score is not None else AUTO_EXECUTE_MIN_SCORE
     results    = []
+    # Reset per-scan DT-BP exhaustion cache so a previous scan's state
+    # doesn't carry over.
+    reset_bp_cache()
+
     # Track positions and trades opened THIS run so limits are enforced
     # even before Alpaca fills propagate back through the API
     _new_positions = 0

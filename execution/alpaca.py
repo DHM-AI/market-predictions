@@ -48,14 +48,72 @@ def is_live_mode() -> bool:
 def get_account() -> dict:
     client = _get_client()
     acct = client.get_account()
+    # daytrading_buying_power is what bracket orders (TimeInForce.DAY) actually
+    # consume. Different from regt_buying_power (overnight) and buying_power
+    # (overall). With many open positions, DT-BP is what gets exhausted first.
+    dt_bp = getattr(acct, "daytrading_buying_power", None) or getattr(acct, "day_trading_buying_power", None)
     return {
-        "buying_power":    float(acct.buying_power),
-        "portfolio_value": float(acct.portfolio_value),
-        "cash":            float(acct.cash),
-        "equity":          float(acct.equity),
-        "last_equity":     float(acct.last_equity) if acct.last_equity else float(acct.equity),
-        "paper":           not ALPACA_LIVE_MODE,
+        "buying_power":            float(acct.buying_power),
+        "daytrading_buying_power": float(dt_bp) if dt_bp is not None else float(acct.buying_power),
+        "regt_buying_power":       float(getattr(acct, "regt_buying_power", acct.buying_power)),
+        "portfolio_value":         float(acct.portfolio_value),
+        "cash":                    float(acct.cash),
+        "equity":                  float(acct.equity),
+        "last_equity":             float(acct.last_equity) if acct.last_equity else float(acct.equity),
+        "paper":                   not ALPACA_LIVE_MODE,
     }
+
+
+# Buying power safety factor — leaves headroom for slippage and same-scan orders
+_BP_SAFETY_FACTOR = 0.90
+# In-process cache: once DT-BP is found exhausted, short-circuit the rest of
+# the scan so we don't fire 10 redundant API calls + log lines.
+_dt_bp_exhausted_for_scan = False
+
+
+def reset_bp_cache() -> None:
+    """Call at start of each scan so the cache doesn't persist across scans."""
+    global _dt_bp_exhausted_for_scan
+    _dt_bp_exhausted_for_scan = False
+
+
+def _check_buying_power(dollar_amount: float, ticker: str) -> tuple[bool, str]:
+    """
+    Pre-trade DT-BP check. Returns (ok, reason).
+    Bracket orders (TimeInForce.DAY) consume daytrading_buying_power.
+    Reject early if the trade would exceed 90% of available DT-BP.
+    """
+    global _dt_bp_exhausted_for_scan
+    if _dt_bp_exhausted_for_scan:
+        return False, "day-trading buying power exhausted earlier in this scan"
+    try:
+        acct = get_account()
+        dt_bp = acct.get("daytrading_buying_power", 0)
+        usable = dt_bp * _BP_SAFETY_FACTOR
+        if dollar_amount > usable:
+            # Mark exhausted so subsequent orders short-circuit
+            _dt_bp_exhausted_for_scan = True
+            # Notify Slack once (not per-ticker spam)
+            try:
+                from alerts.slack import _post
+                _post({
+                    "text": (
+                        f"⚠️ *DT-BP exhausted* — skipping remaining trades this scan\n"
+                        f"> Available: ${dt_bp:,.0f}  ·  Need: ${dollar_amount:,.0f}  ·  "
+                        f"Tried: `{ticker}`\n"
+                        f"> Close some positions or wait until next session."
+                    ),
+                })
+            except Exception:
+                pass
+            return False, (
+                f"insufficient day-trading buying power "
+                f"(need ${dollar_amount:,.0f}, have ${dt_bp:,.0f}, "
+                f"usable ${usable:,.0f})"
+            )
+        return True, ""
+    except Exception as e:
+        return False, f"BP check failed: {e}"
 
 
 def get_current_price(ticker: str) -> float | None:
@@ -105,6 +163,15 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
     max_allowed = BANKROLL * MAX_POSITION_PCT
     if dollar_amount > max_allowed:
         dollar_amount = max_allowed
+
+    # ── Pre-trade day-trading buying-power check ──────────────────────────
+    # Bracket orders consume DT-BP, not regular BP. With 10+ positions open
+    # this gets exhausted fast. Skipping early avoids the noisy Slack-spam
+    # of 10 simultaneous "insufficient day trading buying power" failures.
+    bp_ok, bp_reason = _check_buying_power(dollar_amount, ticker)
+    if not bp_ok:
+        print(f"[APEX] {ticker} skipped — {bp_reason}")
+        return {"status": "skipped", "ticker": ticker, "reason": bp_reason}
 
     mode = "LIVE" if is_live_mode() else "PAPER"
     side = "buy" if direction == "bullish" else "sell"
