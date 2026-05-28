@@ -30,3 +30,4 @@ build/
 
 # Session state — never commit
 .claude-flow/
+SECRETS.md
