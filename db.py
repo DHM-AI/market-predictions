@@ -186,8 +186,16 @@ def prune_sentiment_cache(days: int = 30) -> None:
 
 
 def db_available() -> bool:
-    """Return True if Supabase credentials are configured."""
-    return bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"))
+    """Return True if Supabase credentials are configured.
+
+    R-3 fix: was checking SUPABASE_KEY only. Service-key-only deployments
+    silently lost EVERY DB feature (prediction persistence, partial-exit
+    history, sentiment cache, ORACLE learnings).
+    """
+    return bool(
+        os.environ.get("SUPABASE_URL")
+        and (os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY"))
+    )
 
 
 # ── Learnings ─────────────────────────────────────────────────────────────────

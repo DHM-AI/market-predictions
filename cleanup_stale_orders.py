@@ -42,8 +42,14 @@ def cleanup_stale_orders(stale_hours: float = STALE_HOURS,
         print("[CLEANUP] Alpaca not configured — skipping.")
         return []
 
+    # N-4 fix: was OPEN-only — stale limit entries that already moved to
+    # ACCEPTED / NEW / HELD escaped cleanup and could fill at the next open
+    # at stale signal prices. Use ALL + is_active_order().
+    from execution.alpaca import is_active_order
     client = _get_client()
-    orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=200))
+    orders = [o for o in client.get_orders(GetOrdersRequest(
+                    status=QueryOrderStatus.ALL, limit=500))
+              if is_active_order(o)]
     now = datetime.now(timezone.utc)
 
     cancelled = []

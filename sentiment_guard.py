@@ -50,7 +50,41 @@ def _get_cached_sentiment(ticker: str) -> dict:
     return {"score": 0.0, "velocity": 0.0, "spike": False, "source": "unavailable"}
 
 
-def _slack(text: str) -> None:
+def _slack(text: str, dedup_key: str | None = None,
+           cooldown_hours: int = 6) -> None:
+    """Post to Slack with optional per-key dedup window.
+
+    N-6 fix: VIGIL was Slacking every ticker every cycle — 70+ messages/day
+    if multiple positions trended negative. With dedup_key set, same key
+    only posts once per cooldown_hours.
+    """
+    if dedup_key:
+        try:
+            import db as _db
+            if _db.db_available():
+                from datetime import datetime as _dt, timedelta as _td
+                # Look up most recent alert for this key
+                cutoff = (_dt.utcnow() - _td(hours=cooldown_hours)).isoformat()
+                _rows = (_db._client().table("trades")
+                            .select("timestamp")
+                            .eq("status", f"vigil_alert:{dedup_key}")
+                            .gte("timestamp", cutoff)
+                            .limit(1).execute())
+                if _rows.data:
+                    return   # silenced by cooldown
+                # Record this alert so next call in cooldown silences
+                _db.save_trade({
+                    "order_id":  f"vigil-{dedup_key}-{int(_dt.utcnow().timestamp())}",
+                    "ticker":    dedup_key.split(":")[0] if ":" in dedup_key else dedup_key,
+                    "side":      "alert",
+                    "dollar_amount": 0,
+                    "mode":      "PAPER",
+                    "status":    f"vigil_alert:{dedup_key}",
+                    "reason":    text[:200],
+                    "timestamp": _dt.utcnow().isoformat(),
+                })
+        except Exception:
+            pass   # if dedup fails, fall through and just post
     try:
         from alerts.slack import _post
         _post({"text": text})
@@ -116,7 +150,8 @@ def run_guard() -> list[dict]:
                 f"⚠️ *Sentiment Guard — Stop Tightened: {ticker}* ({direction_lbl})\n"
                 f">Sentiment: *{score:+.3f}* ({'bearish' if is_long else 'bullish'} shift)\n"
                 f">Stop loss tightened to *${new_stop}* (1.5% below current price)\n"
-                f">Position P&L: *{pl_pct:+.1f}%* · Take-profit target unchanged"
+                f">Position P&L: *{pl_pct:+.1f}%* · Take-profit target unchanged",
+                dedup_key=f"{ticker}:tighten", cooldown_hours=6,
             )
             actions.append({
                 "ticker": ticker, "action": "tightened",
@@ -130,7 +165,8 @@ def run_guard() -> list[dict]:
                 f"🟡 *Sentiment Guard — Warning: {ticker}* ({direction_lbl})\n"
                 f">Sentiment: *{score:+.3f}* (weakening, velocity {velocity:+.3f})\n"
                 f">Position P&L: *{pl_pct:+.1f}%* · No action yet — monitoring\n"
-                f">If sentiment drops further, stop will be tightened automatically"
+                f">If sentiment drops further, stop will be tightened automatically",
+                dedup_key=f"{ticker}:warn", cooldown_hours=12,
             )
             actions.append({
                 "ticker": ticker, "action": "warned",

@@ -365,11 +365,15 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
         # bracket failure. Only fall back for KNOWN-RECOVERABLE errors. For
         # anything else, refuse and Slack-alert — naked positions are worse
         # than missed trades.
+        # R-1 fix: explicit parens — Python's `and` binds tighter than `or`,
+        # but readability + future-proofing matters; also tightened the
+        # base_price match to require an Alpaca-specific phrase rather than
+        # any error string that happens to contain "base_price".
         _err_lc = str(e).lower()
         _recoverable = (
-            "base_price" in _err_lc
-            or "stop_loss"  in _err_lc and "must be" in _err_lc
-            or "take_profit" in _err_lc and "must be" in _err_lc
+            ("base_price" in _err_lc and "stop" in _err_lc)
+            or ("stop_loss"   in _err_lc and "must be" in _err_lc)
+            or ("take_profit" in _err_lc and "must be" in _err_lc)
         )
         if _recoverable:
             print(f"[APEX] Bracket failed ({e}) — recoverable, falling back to simple order.")
@@ -715,6 +719,25 @@ def close_position(ticker: str) -> dict:
             else:
                 raise
 
+        # R-4 fix: write a status="closed" row so get_partial_exit_history()'s
+        # last_close lookup actually works. Without this row, partial-exit
+        # entries from a CLOSED prior position could leak into a future re-entry.
+        try:
+            import db as _db
+            if _db.db_available():
+                _db.save_trade({
+                    "order_id":  f"close-{ticker}-{int(_time.time())}",
+                    "ticker":    ticker,
+                    "side":      "close",
+                    "dollar_amount": 0,
+                    "mode":      "LIVE" if is_live_mode() else "PAPER",
+                    "status":    "closed",
+                    "reason":    "close_position() called",
+                    "timestamp": datetime.now().isoformat(),
+                })
+        except Exception as _ce:
+            print(f"[close_position] could not log close to DB: {_ce}")
+
         return {"status": "closed", "ticker": ticker, "timestamp": datetime.now().isoformat()}
     except Exception as e:
         return {"status": "error", "reason": str(e), "ticker": ticker}
@@ -1015,17 +1038,42 @@ def trail_positions(
                             "cancelled_sl": 0, "status": "rescue_stop_placed",
                             "timestamp": datetime.now().isoformat(),
                         })
-                        # Slack ping — naked positions are a safety incident
+                        # Slack ping — naked positions are a safety incident.
+                        # N-7 fix: dedup per ticker per day so a stuck naked
+                        # position doesn't fire 32 Slack messages/day (one
+                        # per 15-min AEGIS run).
                         try:
-                            from alerts.slack import _post
-                            _post({"text": (
-                                f"🩹 *Naked position rescued — {ticker}*\n"
-                                f">{('LONG' if is_long else 'SHORT')} {qty:g} @ avg ${_entry_px:.2f} · "
-                                f"current ${_cur_px:.2f} · P&L {pct_gain:+.1f}%\n"
-                                f">Placed rescue stop @ ${new_stop:.2f} "
-                                f"({KELLY_LOSS_PCT*100:.0f}% risk cap from "
-                                f"{'entry' if new_stop == risk_stop else 'current price'})"
-                            )})
+                            import db as _db
+                            _send = True
+                            if _db.db_available():
+                                from datetime import datetime as _dt, timedelta as _td
+                                _cutoff = (_dt.utcnow() - _td(hours=8)).isoformat()
+                                _hits = (_db._client().table("trades")
+                                            .select("timestamp")
+                                            .eq("status", f"aegis_rescue_alert:{ticker}")
+                                            .gte("timestamp", _cutoff)
+                                            .limit(1).execute())
+                                if _hits.data:
+                                    _send = False
+                                else:
+                                    _db.save_trade({
+                                        "order_id": f"aegis-alert-{ticker}-{int(datetime.now().timestamp())}",
+                                        "ticker": ticker, "side": "alert", "dollar_amount": 0,
+                                        "mode": "LIVE" if is_live_mode() else "PAPER",
+                                        "status": f"aegis_rescue_alert:{ticker}",
+                                        "reason": "naked_rescue", "timestamp": datetime.now().isoformat(),
+                                    })
+                            if _send:
+                                from alerts.slack import _post
+                                _post({"text": (
+                                    f"🩹 *Naked position rescued — {ticker}*\n"
+                                    f">{('LONG' if is_long else 'SHORT')} {qty:g} @ avg ${_entry_px:.2f} · "
+                                    f"current ${_cur_px:.2f} · P&L {pct_gain:+.1f}%\n"
+                                    f">Placed rescue stop @ ${new_stop:.2f} "
+                                    f"({KELLY_LOSS_PCT*100:.0f}% risk cap from "
+                                    f"{'entry' if new_stop == risk_stop else 'current price'})\n"
+                                    f">_Further rescue alerts for {ticker} silenced for 8h_"
+                                )})
                         except Exception:
                             pass
                         # Re-fetch this ticker's orders so subsequent logic sees the rescue stop
@@ -1186,17 +1234,32 @@ def trail_positions(
                     # CRITICAL audit C-7: reissue bracket TP sized to remain_qty.
                     # Was leaving orphan TP at original qty → would over-sell on
                     # exit and Alpaca would reject → no TP coverage on the tranche.
-                    if remain_qty > 0 and _tp_snapshots:
+                    # R-2 fix: reissue TP sized to remain_qty. If broker had a
+                    # bracket TP, reuse its limit price. If not (position came
+                    # from _place_simple_order / naked rescue / sentiment_guard
+                    # replacement / crypto), synthesize one at MOVE_TARGET_PCT
+                    # from entry — otherwise the tranche has NO upside exit at all.
+                    if remain_qty > 0:
                         try:
                             from alpaca.trading.requests import LimitOrderRequest as _LOR
-                            _tp0 = _tp_snapshots[0]   # all bracket TPs share the price
+                            from config import MOVE_TARGET_PCT as _MTP
+                            if _tp_snapshots:
+                                _tp0 = _tp_snapshots[0]
+                                _tp_side, _tp_px = _tp0["side"], _tp0["limit_price"]
+                                _src = "broker"
+                            else:
+                                _tp_side = OrderSide.SELL if is_long else OrderSide.BUY
+                                _tp_px = (round(_entry_px * (1 + _MTP), 2)
+                                          if is_long else
+                                          round(_entry_px * (1 - _MTP), 2))
+                                _src = "synthesized"
                             _tp_req = _LOR(
-                                symbol=ticker, qty=remain_qty, side=_tp0["side"],
-                                limit_price=_tp0["limit_price"],
+                                symbol=ticker, qty=remain_qty, side=_tp_side,
+                                limit_price=_tp_px,
                                 time_in_force=TimeInForce.GTC,
                             )
                             client.submit_order(_tp_req)
-                            print(f"[AEGIS] {ticker} TP resized to {remain_qty} @ ${_tp0['limit_price']:.2f}")
+                            print(f"[AEGIS] {ticker} TP ({_src}) sized to {remain_qty} @ ${_tp_px:.2f}")
                         except Exception as _tpe:
                             print(f"[AEGIS] {ticker} could not reissue TP at remain_qty: {_tpe}")
 

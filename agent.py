@@ -139,7 +139,15 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
             continue
 
         # Hard stop — enforce position + trade limits using in-run counters
+        # N-5 fix: refresh open_positions live from Alpaca every 5 picks so
+        # the position-count gate doesn't get fooled by stale state from the
+        # AEGIS pre-scan (which may have closed penny stocks) or manual closes.
         from risk.portfolio_guard import MAX_OPEN_POSITIONS, MAX_DAILY_TRADES
+        if (_new_positions % 5) == 0:
+            try:
+                open_positions = get_positions() or open_positions
+            except Exception:
+                pass
         current_positions = len(open_positions) + _new_positions
         if current_positions >= MAX_OPEN_POSITIONS:
             print(f"  {ticker}: BLOCKED — position limit reached "
