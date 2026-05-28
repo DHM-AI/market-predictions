@@ -115,22 +115,41 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
     _new_positions = 0
     _new_trades    = 0
 
-    # ── Auto-execute gate: BOTH score AND confidence must qualify ───────────
-    # Score alone was too permissive — RYOJ scored 78-80 every scan but
-    # confidence was "Low" every time, and we kept buying it into a -$4.2k loss.
-    # Confidence comes from the rule-based scorer (not the XGB+sentiment blend)
-    # so it reflects how many actual signals fire, not just model confidence.
+    # ── Auto-execute gate (Option B — 2026-05-28) ──────────────────────────
+    # OLD rule: score ≥ MIN  AND  confidence in {High, Medium}
+    # NEW rule: score ≥ HIGH_SCORE_BYPASS  (model-only path, very high bar)
+    #       OR (score ≥ MIN  AND  confidence in {High, Medium})
+    #
+    # Rationale: in strong uptrend regimes (today: bull, VIX 15, +11% vs 200MA)
+    # most picks are pure trend-continuation — the model spots them fine but
+    # the rule signals (BB squeeze / ATR compress / volume surge) don't fire
+    # because there's no compression pattern, it's just "stocks going up."
+    # Allowing the very-high-score model-only path catches those without
+    # opening the RYOJ trap (RYOJ scored 78 not 85).
+    from config import HIGH_SCORE_BYPASS_THRESHOLD
     _ALLOWED_CONFIDENCE = {"High", "Medium"}
-    score_ok      = picks_df["score"] >= _effective_min_score
-    confidence_ok = picks_df.get("confidence", "Low").isin(_ALLOWED_CONFIDENCE)
-    auto_picks    = picks_df[score_ok & confidence_ok]
+    score_ok       = picks_df["score"] >= _effective_min_score
+    high_score_ok  = picks_df["score"] >= HIGH_SCORE_BYPASS_THRESHOLD
+    confidence_ok  = picks_df.get("confidence", "Low").isin(_ALLOWED_CONFIDENCE)
+    qualifies      = high_score_ok | (score_ok & confidence_ok)
+    auto_picks     = picks_df[qualifies]
 
-    # Log what got dropped by the confidence filter so it's visible in scan output
-    dropped = picks_df[score_ok & ~confidence_ok]
+    # Log what got dropped — and split the reason (low conf vs below high-score bypass)
+    dropped = picks_df[score_ok & ~qualifies]
     if not dropped.empty:
-        print(f"[THEMIS] Skipped {len(dropped)} pick(s) — score≥{_effective_min_score} but Low confidence:")
+        print(f"[THEMIS] Skipped {len(dropped)} pick(s) — score≥{_effective_min_score} "
+              f"but neither score≥{HIGH_SCORE_BYPASS_THRESHOLD} (model bypass) "
+              f"nor confidence≥Medium:")
         for _, _r in dropped.iterrows():
             print(f"         · {_r['ticker']:6s}  score={_r['score']:.0f}  dir={_r.get('direction','?')}  conf={_r.get('confidence','?')}")
+    # Also log what got through via the high-score bypass — useful to track
+    # whether the new path is causing problems
+    bypass_picks = picks_df[high_score_ok & ~confidence_ok]
+    if not bypass_picks.empty:
+        print(f"[THEMIS] Allowed {len(bypass_picks)} pick(s) via HIGH-SCORE BYPASS "
+              f"(score≥{HIGH_SCORE_BYPASS_THRESHOLD}, Low confidence):")
+        for _, _r in bypass_picks.iterrows():
+            print(f"         · {_r['ticker']:6s}  score={_r['score']:.0f}  dir={_r.get('direction','?')}")
     for _, row in auto_picks.iterrows():
         ticker    = row["ticker"]
         direction = row.get("direction", "bullish")

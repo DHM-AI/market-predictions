@@ -170,8 +170,15 @@ PARTIAL_EXIT_TRIGGER_PCT = PARTIAL_EXIT_TIER1_TRIGGER
 PARTIAL_EXIT_FRACTION    = PARTIAL_EXIT_TIER1_FRACTION
 
 # ── Auto-execution threshold ──────────────────────────────────────────────────
-# Only auto-execute if score >= this AND Alpaca is configured
-AUTO_EXECUTE_MIN_SCORE = 70
+# Two-tier gate (Option B, 2026-05-28):
+#   1. score ≥ AUTO_EXECUTE_MIN_SCORE  AND  confidence in {High, Medium}   → normal path
+#   2. score ≥ HIGH_SCORE_BYPASS_THRESHOLD                                  → model-only bypass
+# Bypass path is for strong-trend regimes where the XGB model spots momentum
+# the rule signals can't confirm (no BB squeeze / no compression — just
+# "stock going up"). Set bypass ABOVE the score that bit RYOJ (78) to keep
+# the RYOJ guardrail intact.
+AUTO_EXECUTE_MIN_SCORE      = 70
+HIGH_SCORE_BYPASS_THRESHOLD = 85   # Low-conf trades only if model is REALLY sure
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 LOGS_DIR            = "logs"
