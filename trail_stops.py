@@ -31,8 +31,11 @@ results = trail_positions()
 if not results:
     print("[AEGIS] Nothing to act on — all positions below trigger thresholds.")
 else:
-    partial_exits = [r for r in results if r.get("action") == "partial_exit"]
-    trail_upgrades = [r for r in results if r.get("action") != "partial_exit"]
+    # Partial exits use action names "partial_exit_t1" / "partial_exit_t2".
+    # Match by prefix so they don't leak into trail_upgrades (which would crash
+    # on the missing 'trail_pct' key).
+    partial_exits  = [r for r in results if str(r.get("action", "")).startswith("partial_exit")]
+    trail_upgrades = [r for r in results if not str(r.get("action", "")).startswith("partial_exit")]
 
     if partial_exits:
         print(f"\n✂️  {len(partial_exits)} partial exit(s) fired:")
