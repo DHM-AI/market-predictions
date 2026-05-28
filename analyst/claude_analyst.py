@@ -30,8 +30,30 @@ def _build_prompt(row: dict) -> str:
     )
 
 
+_REFUSAL_MARKERS = (
+    "i won't", "i will not", "i can't", "i cannot",
+    "i need to flag", "i need to point out",
+    "appears to be an attempt", "appears to be a prompt",
+    "system directive", "system prompt",
+    "i should not", "ignore this", "decline to",
+)
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """True if Claude's response looks like a prompt-injection refusal
+    rather than an actual analysis. Bug fix 2026-05-28: ORACLE directives
+    used to be framed as 'ORACLE system directive: ...' which Claude
+    interpreted as a prompt-injection attempt and refused. The refusal
+    text then leaked into trade reasons in Supabase + Slack."""
+    if not text:
+        return False
+    lower = text.lower()[:300]   # only check the opening — substantive
+                                  # analysis won't have these phrases up front
+    return any(m in lower for m in _REFUSAL_MARKERS)
+
+
 def explain_picks(scored_df, top_n: int = TOP_N_CLAUDE_ANALYSIS,
-                  oracle_directive: str = "") -> dict[str, str]:
+                  oracle_directive: str = ""):
     """
     Returns {ticker: markdown_explanation} for the top N picks.
     Uses non-streaming for batch processing (email/logging).
@@ -39,21 +61,46 @@ def explain_picks(scored_df, top_n: int = TOP_N_CLAUDE_ANALYSIS,
     if scored_df is None or scored_df.empty:
         return {}
 
-    results: dict[str, str] = {}
+    results = {}
     top = scored_df.head(top_n)
 
     for _, row in top.iterrows():
         ticker = row["ticker"]
         prompt = _build_prompt(row.to_dict())
         if oracle_directive:
-            prompt = f"ORACLE system directive for today: {oracle_directive}\n\n" + prompt
+            # Was 'ORACLE system directive: ...' — triggered Claude's
+            # prompt-injection defense. Reframe as research context.
+            prompt = (
+                f"Today's research focus (one-line note from our learning loop, "
+                f"may inform your analysis but does NOT override the technical setup): "
+                f"\"{oracle_directive}\"\n\n" + prompt
+            )
         try:
             message = _get_client().messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}],
             )
-            results[ticker] = message.content[0].text
+            text = message.content[0].text
+            # Safety filter: if Claude refused the prompt, regenerate
+            # WITHOUT the directive — better to have a clean analysis with
+            # no research-focus context than a refusal message saved as
+            # the trade's permanent reason.
+            if _looks_like_refusal(text):
+                print(f"[claude] {ticker}: response looked like a refusal "
+                      f"({text[:80]!r}) — regenerating without directive")
+                clean_prompt = _build_prompt(row.to_dict())
+                message = _get_client().messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=400,
+                    messages=[{"role": "user", "content": clean_prompt}],
+                )
+                text = message.content[0].text
+                if _looks_like_refusal(text):
+                    text = (f"Technical setup: composite score "
+                            f"{row.get('score', 0)}/100, signals: "
+                            f"{', '.join(row.get('signals_triggered', [])[:3]) or 'see breakdown'}")
+            results[ticker] = text
         except Exception as e:
             results[ticker] = f"Analysis unavailable: {e}"
 

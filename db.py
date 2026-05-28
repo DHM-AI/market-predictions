@@ -231,7 +231,7 @@ def load_trades() -> list[dict]:
 
 
 def get_partial_exit_history(lookback_days: int = 90,
-                              open_tickers: set | None = None) -> dict:
+                              open_tickers=None) -> dict:
     """
     Return {ticker: {'t1': bool, 't2': bool, 't1_qty': float}} for tickers that
     have had partial exits within the lookback window.
