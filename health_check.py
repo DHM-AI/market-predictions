@@ -367,6 +367,32 @@ except Exception as e:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 8. DASHBOARD AVAILABILITY
+# ══════════════════════════════════════════════════════════════════════════════
+try:
+    import urllib.request, urllib.error
+    _DASH_URL = "https://illuminati-dashboard.pages.dev/api/dashboard"
+    req = urllib.request.Request(_DASH_URL, headers={"User-Agent": "illuminati-health"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            _code = resp.getcode()
+            _body = resp.read(200).decode("utf-8", errors="ignore")
+            if _code == 200 and '"account"' in _body:
+                report.add("Dashboard API", "PASS",
+                           f"HTTP 200 — data confirmed in response")
+            else:
+                report.add("Dashboard API", "WARN",
+                           f"HTTP {_code} but response looks empty")
+    except urllib.error.HTTPError as he:
+        report.add("Dashboard API", "FAIL",
+                   f"HTTP {he.code} — dashboard may be returning 1102/503")
+    except urllib.error.URLError as ue:
+        report.add("Dashboard API", "FAIL", f"Network error: {str(ue)[:80]}")
+except Exception as e:
+    report.add("Dashboard API", "WARN", f"Check skipped: {str(e)[:80]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
 overall = report.overall()
