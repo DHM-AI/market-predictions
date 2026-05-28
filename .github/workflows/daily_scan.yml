@@ -4,6 +4,7 @@ on:
   schedule:
     # All times in UTC. Market hours ET = UTC-4 (EDT, summer) / UTC-5 (EST, winter)
     # Currently EDT (UTC-4):
+    # ── Primary triggers (every hour during market hours) ──────────────
     - cron: '0 11 * * 1-5'    #  7:00 AM ET — pre-market open
     - cron: '0 12 * * 1-5'    #  8:00 AM ET — pre-market momentum
     - cron: '0 13 * * 1-5'    #  9:00 AM ET — market just opened
@@ -17,6 +18,16 @@ on:
     - cron: '30 19 * * 1-5'   #  3:30 PM ET — power hour
     - cron: '0 20 * * 1-5'    #  4:00 PM ET — after-hours check
     - cron: '0 2 * * 2-6'     # Mon–Fri 10 PM ET — ORACLE daily intelligence cycle (2 AM UTC next day)
+    # ── 30-min fallback triggers (catch GitHub cron delays) ────────────
+    # GitHub's cron scheduler can lag 30-120 min. These run 30 min after
+    # primary triggers. The scan itself deduplicates: if a scan ran within
+    # the last 50 min it skips execution, so no double-scanning occurs.
+    - cron: '30 11 * * 1-5'   #  7:30 AM ET — fallback for 7 AM
+    - cron: '30 12 * * 1-5'   #  8:30 AM ET — fallback for 8 AM
+    - cron: '30 15 * * 1-5'   # 11:30 AM ET — fallback for 11 AM
+    - cron: '30 16 * * 1-5'   # 12:30 PM ET — fallback for noon
+    - cron: '30 17 * * 1-5'   #  1:30 PM ET — fallback for 1 PM
+    - cron: '30 18 * * 1-5'   #  2:30 PM ET — fallback for 2 PM
 
   workflow_dispatch:
     inputs:
@@ -50,13 +61,19 @@ jobs:
 
       - name: Run agent
         run: |
+          SCHED="${{ github.event.schedule }}"
           if [ "${{ github.event.inputs.mode }}" = "postmortem" ]; then
             python -c "from analyst.oracle import run; run()"
-          elif [ "${{ github.event.schedule }}" = "0 2 * * 2-6" ]; then
+          elif [ "$SCHED" = "0 2 * * 2-6" ]; then
             python -c "from analyst.oracle import run; run()"
           elif [ "${{ github.event.inputs.mode }}" = "scan-no-trade" ]; then
             python agent.py --no-trade
           else
+            # Mark fallback triggers so the agent can skip if already scanned
+            case "$SCHED" in
+              "30 11 * * 1-5"|"30 12 * * 1-5"|"30 15 * * 1-5"|"30 16 * * 1-5"|"30 17 * * 1-5"|"30 18 * * 1-5")
+                export SCAN_FALLBACK=true ;;
+            esac
             python agent.py
           fi
         env:

@@ -15,6 +15,7 @@ Run:
     python agent.py --no-trade   # skip Alpaca execution
     python agent.py --postmortem # run learning agent only
 """
+import os
 import sys
 import time
 import pandas as pd
@@ -271,6 +272,21 @@ def run_scan(send_email: bool = True,
              verbose: bool = True) -> pd.DataFrame:
     start = time.time()
     today = datetime.today().strftime("%Y-%m-%d")
+
+    # ── Deduplication guard for fallback cron triggers ───────────────────
+    # Fallback triggers set SCAN_FALLBACK=true. If today already has predictions,
+    # the primary cron ran fine → skip. If no predictions yet, run as normal.
+    if os.getenv("SCAN_FALLBACK") == "true" and db.db_available():
+        try:
+            _existing = db.load_predictions_for_date(today)
+            if _existing:
+                print(f"[ARGUS] ⏭  Fallback trigger skipped — {len(_existing)} predictions "
+                      f"already written for {today} (primary cron ran fine).")
+                return pd.DataFrame()
+            else:
+                print(f"[ARGUS] 🔁 Fallback trigger activating — no predictions yet for {today}.")
+        except Exception:
+            pass   # if check fails, proceed normally
 
     print(f"\n{'='*62}")
     print(f"  Illuminati  |  {today}")
