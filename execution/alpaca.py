@@ -238,16 +238,34 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
     # Get current price to calculate SL/TP and convert notional → shares
     price = get_current_price(ticker)
 
-    # Fallback: try yfinance if Alpaca data feed fails
+    # Fallback: try yfinance if Alpaca data feed fails.
+    # N-9 fix: yfinance.download() doesn't expose a `timeout` param so a
+    # stalled HTTP call can hang the whole scan past CF Workers' 30s wall.
+    # Run it in a daemon thread with a hard 5s timeout — if it doesn't return,
+    # skip the trade rather than stalling.
     if price is None or price <= 0:
         try:
-            import yfinance as yf
-            hist = yf.download(ticker, period="1d", interval="1m", progress=False, auto_adjust=True)
-            if not hist.empty:
-                price = float(hist["Close"].iloc[-1])
+            import threading
+            _result = [None]
+            def _yf_fetch():
+                try:
+                    import yfinance as yf
+                    hist = yf.download(ticker, period="1d", interval="1m",
+                                       progress=False, auto_adjust=True)
+                    if not hist.empty:
+                        _result[0] = float(hist["Close"].iloc[-1])
+                except Exception:
+                    pass
+            _th = threading.Thread(target=_yf_fetch, daemon=True)
+            _th.start()
+            _th.join(timeout=5.0)
+            if _result[0] is not None:
+                price = _result[0]
                 print(f"[APEX] Used yfinance price for {ticker}: ${price:.2f}")
-        except Exception:
-            pass
+            elif _th.is_alive():
+                print(f"[APEX] yfinance price fetch for {ticker} timed out (5s) — skipping")
+        except Exception as _ye:
+            print(f"[APEX] yfinance fallback failed for {ticker}: {_ye}")
 
     if price is None or price <= 0:
         print(f"[APEX] Could not get price for {ticker} — skipping (no unprotected order placed)")

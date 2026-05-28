@@ -26,6 +26,59 @@ if not is_configured():
     sys.exit(0)
 
 print("[AEGIS] Running partial exit + trailing stop check...")
+
+# M-5 fix: BEFORE trailing logic, sweep for bracket exits that fired since the
+# last AEGIS cycle and write closed-row to Supabase. Without this, partial-exit
+# history lookups (get_partial_exit_history) couldn't tell if a stale T1/T2
+# record applied to a NEW re-entry of the same ticker — only the open_tickers
+# filter covered it, leaving a same-cycle re-entry edge case.
+try:
+    from execution.alpaca import _get_client, get_positions, is_configured as _aok, order_status
+    from alpaca.trading.requests import GetOrdersRequest as _GOR
+    from alpaca.trading.enums import QueryOrderStatus as _QOS
+    import db as _db
+    from datetime import datetime as _dt, timedelta as _td
+
+    if _aok() and _db.db_available():
+        _c = _get_client()
+        _cutoff = (_dt.utcnow() - _td(minutes=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _recent_fills = _c.get_orders(_GOR(status=_QOS.ALL, after=_cutoff, limit=200))
+        _open_tickers = {p["ticker"] for p in (get_positions() or [])}
+
+        # An order that filled in the last 20 min AND its ticker is no longer
+        # in open positions = closed via bracket child (TP/SL/trailing).
+        for o in _recent_fills:
+            if order_status(o) != "filled":
+                continue
+            sym = o.symbol
+            if sym in _open_tickers:
+                continue
+            otype = str(getattr(o, "type", "")).lower()
+            if "limit" in otype:
+                _status = "tp_hit"
+            elif "trailing" in otype:
+                _status = "trail_hit"
+            elif "stop" in otype:
+                _status = "sl_hit"
+            else:
+                continue   # not a bracket child
+            try:
+                _db.save_trade({
+                    "order_id": f"bracket-{_status}-{sym}-{str(o.id)[:8]}",
+                    "ticker":   sym,
+                    "side":     "close",
+                    "dollar_amount": float(getattr(o, "filled_avg_price", 0) or 0) * float(getattr(o, "filled_qty", 0) or 0),
+                    "mode":     "LIVE" if _aok() else "PAPER",
+                    "status":   _status,
+                    "reason":   f"Bracket {_status.replace('_hit', '').upper()} fill detected by AEGIS sweep",
+                    "timestamp": _dt.utcnow().isoformat(),
+                })
+                print(f"[AEGIS] Logged {_status} for {sym}")
+            except Exception as _bf:
+                print(f"[AEGIS] Could not log bracket fill for {sym}: {_bf}")
+except Exception as _be:
+    print(f"[AEGIS] Bracket-fill sweep error: {_be}")
+
 results = trail_positions()
 
 if not results:
