@@ -157,7 +157,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
     # status="blocked" row (same pattern as vigil_alert/aegis_rescue/closed).
     # These rows are excluded from FIFO matching, recent-trades, and
     # partial-exit history (all of which filter by side/status).
-    _today_str = datetime.today().strftime("%Y-%m-%d")
+    import datetime as _dt_mod; _today_str = _dt_mod.date.today().strftime("%Y-%m-%d")
     def _record_block(_tk, _reason):
         try:
             if db.db_available():
