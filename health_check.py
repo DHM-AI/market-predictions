@@ -113,8 +113,15 @@ try:
         if n == 0:
             # Check if market is open today (weekday)
             if datetime.today().weekday() < 5:
-                report.add("Supabase — Today's Predictions", "WARN",
-                           f"No predictions written yet for {today} (scan may not have run yet)")
+                # Only warn if past 1 PM ET (scans should have run by then)
+                # Before 1 PM = timing issue from manual run, not a real problem
+                now_et_hour = (datetime.utcnow().hour - 4) % 24   # UTC-4 (EDT)
+                if now_et_hour >= 13:
+                    report.add("Supabase — Today's Predictions", "WARN",
+                               f"No predictions written for {today} after 1 PM ET — scans may be failing")
+                else:
+                    report.add("Supabase — Today's Predictions", "PASS",
+                               f"No predictions yet for {today} (before 1 PM ET — scans still running)")
             else:
                 report.add("Supabase — Today's Predictions", "PASS",
                            "Weekend — no predictions expected")
