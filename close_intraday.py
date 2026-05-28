@@ -18,13 +18,16 @@ def _get_todays_entries() -> set[str]:
     try:
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
+        from execution.alpaca import order_status   # CRITICAL audit C-4
         today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
         orders    = _get_client().get_orders(GetOrdersRequest(
-            status=QueryOrderStatus.ALL, after=today_utc, limit=200))
+            status=QueryOrderStatus.ALL, after=today_utc, limit=500))
+        # Fix C-4: order_status() normalizes "OrderStatus.FILLED" → "filled"
+        # so this set actually matches. Previously DUSK never closed anything.
         return {
             o.symbol for o in orders
             if "buy" in str(getattr(o, "side", "")).lower()
-            and str(getattr(o, "status", "")) in ("filled", "partially_filled")
+            and order_status(o) in ("filled", "partially_filled")
         }
     except Exception as e:
         print(f"[DUSK] Could not fetch today's orders: {e}")

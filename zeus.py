@@ -239,9 +239,12 @@ else:
             after=today_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
         ))
         # Count only filled parent orders (not bracket legs)
+        # CRITICAL audit C-5: was comparing "orderstatus.filled" against "filled"
+        # → always 0, daily trade FAIL was unreachable. order_status() normalizes.
+        from execution.alpaca import order_status
         filled_today = [
             o for o in all_today
-            if str(getattr(o, "status", "")).lower() in ("filled", "partially_filled")
+            if order_status(o) in ("filled", "partially_filled")
             and getattr(o, "order_class", None) != "leg"
         ]
         n_trades = len(filled_today)

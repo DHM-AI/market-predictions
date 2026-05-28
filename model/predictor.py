@@ -93,32 +93,44 @@ def predict_universe(
 
     from signals.scorer import score_ticker  # for direction/duration/signals logic
     rows = []
+    skipped_errors = 0
     for ticker in tickers:
-        df = ohlcv_map.get(ticker, pd.DataFrame())
-        sentiment = (sentiment_map or {}).get(ticker, {})
-        earnings = (earnings_map or {}).get(ticker)
+        # CRITICAL audit C-9: one ticker with a corrupted bar / split-adjusted
+        # NaN / rename used to crash the WHOLE scan loop. Per-ticker try/except
+        # contains the blast radius — at worst we drop that one ticker.
+        try:
+            df = ohlcv_map.get(ticker, pd.DataFrame())
+            sentiment = (sentiment_map or {}).get(ticker, {})
+            earnings = (earnings_map or {}).get(ticker)
 
-        if df is None or df.empty:
-            continue
+            if df is None or df.empty:
+                continue
 
-        # Get XGB probability (0-1)
-        xgb_prob = _xgb_prob(df)
+            # Get XGB probability (0-1)
+            xgb_prob = _xgb_prob(df)
 
-        # Normalize sentiment score to 0-1, clamped to prevent overflow
-        sent_score_norm = max(0.0, min(1.0, normalize_score(sentiment.get("score", 0.0))))
+            # Normalize sentiment score to 0-1, clamped to prevent overflow
+            sent_score_norm = max(0.0, min(1.0, normalize_score(sentiment.get("score", 0.0))))
 
-        # Blend: weighted average → 0-100 scale
-        blended = (XGB_WEIGHT * xgb_prob + SENTIMENT_WEIGHT * sent_score_norm) * 100
+            # Blend: weighted average → 0-100 scale
+            blended = (XGB_WEIGHT * xgb_prob + SENTIMENT_WEIGHT * sent_score_norm) * 100
 
-        if blended < MIN_SCORE_TO_ALERT:
-            continue
+            if blended < MIN_SCORE_TO_ALERT:
+                continue
 
-        # Re-use rule scorer for direction/duration/signals labels (no re-fetch)
-        meta = score_ticker(ticker, df, sentiment, earnings)
-        meta["score"] = round(blended, 1)
-        meta["xgb_prob"] = round(xgb_prob, 4)        # calibrated if available
-        meta["calibrated"] = calibrator_available()  # transparency flag
-        rows.append(meta)
+            # Re-use rule scorer for direction/duration/signals labels (no re-fetch)
+            meta = score_ticker(ticker, df, sentiment, earnings)
+            meta["score"] = round(blended, 1)
+            meta["xgb_prob"] = round(xgb_prob, 4)        # calibrated if available
+            meta["calibrated"] = calibrator_available()  # transparency flag
+            rows.append(meta)
+        except Exception as _e:
+            skipped_errors += 1
+            if skipped_errors <= 5:    # avoid log spam on systemic failure
+                print(f"[PYTHIA] {ticker} skipped: {type(_e).__name__}: {_e}")
+
+    if skipped_errors > 5:
+        print(f"[PYTHIA] ...and {skipped_errors - 5} more tickers skipped silently.")
 
     if not rows:
         return pd.DataFrame()

@@ -81,6 +81,21 @@ def is_active_order(o) -> bool:
     return str(getattr(o, "status", "")).lower() in ACTIVE_ORDER_STATUSES
 
 
+# ── Order-status normalization ─────────────────────────────────────────────
+# Audit C-3/C-4/C-5: Three safety controls (MAX_DAILY_TRADES counter,
+# DUSK day-trade detector, ZEUS audit) were silently broken because
+# `str(OrderStatus.FILLED) == "OrderStatus.FILLED"`, never `"filled"`.
+# Use this helper EVERYWHERE you compare order.status against literals.
+def order_status(o) -> str:
+    """Normalize Alpaca order status to a plain lowercase string.
+
+    Handles both string forms the SDK emits:
+        "filled"             → "filled"
+        "OrderStatus.FILLED" → "filled"
+    """
+    return str(getattr(o, "status", "")).lower().replace("orderstatus.", "")
+
+
 # Buying power safety factor — leaves headroom for slippage and same-scan orders
 _BP_SAFETY_FACTOR = 0.90
 # In-process cache: once DT-BP is found exhausted, short-circuit the rest of
@@ -690,11 +705,16 @@ def tighten_stop(ticker: str, stop_pct: float = 0.015) -> dict:
         if not price:
             return {"status": "error", "reason": "Could not fetch price"}
 
-        # Cancel existing stop orders for this ticker
-        open_orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        # Cancel existing stop orders for this ticker.
+        # CRITICAL audit C-2: Bracket SL legs sit in HELD (not OPEN). Querying
+        # OPEN-only meant tighten_stop() stacked a new tighter stop ON TOP of
+        # the old wider one — could result in duplicate exits or naked qty.
+        active_orders = [o for o in client.get_orders(GetOrdersRequest(
+                            status=QueryOrderStatus.ALL, limit=500))
+                         if is_active_order(o)]
         cancelled = 0
         qty = 0
-        for o in open_orders:
+        for o in active_orders:
             if o.symbol != ticker:
                 continue
             otype = str(getattr(o, "type", "")).lower()

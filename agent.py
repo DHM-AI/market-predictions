@@ -195,8 +195,15 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
                 _prior_pct = _ct["realized_pnl_pct"] / 100.0
                 if abs(_prior_pct) < COOLDOWN_WIN_THRESHOLD:
                     continue
-                # Determine prior direction
-                _prior_long = _ct["realized_pnl"] > 0  # simplified: profit = was long going up
+                # CRITICAL audit C-1: Was inferring direction from P&L sign,
+                # which mislabels profitable SHORTS as "long". The trade dict
+                # already carries `side` — use it. Falls back to old behavior
+                # only if `side` is missing.
+                _side = str(_ct.get("side", "")).lower()
+                if _side in ("long", "short"):
+                    _prior_long = (_side == "long")
+                else:
+                    _prior_long = _ct["realized_pnl"] > 0   # legacy fallback
                 _cur_bearish = direction == "bearish"
                 if _prior_long and _cur_bearish and _prior_pct > 0:
                     print(f"  {ticker}: COOLDOWN — closed long +{_prior_pct:.1%} "

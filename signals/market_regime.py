@@ -216,13 +216,15 @@ def _fetch_regime() -> dict:
 
     except Exception as e:
         print(f"[regime] Error fetching regime: {e}")
-        # Neutral fallback — assume half of sectors are above 50MA so the
-        # sector_momentum signal degrades gracefully (not all biased one way).
+        # CRITICAL audit C-11: USED to fail OPEN (auto_exec_ok=True, mult=1.0).
+        # yfinance is most likely to flake exactly when SPY/VIX moves hard —
+        # the WORST moment to trade full size blind. Now fails DEFENSIVE:
+        # half size, no auto-exec, and a loud warning.
         fallback_status = {etf: (i < 6) for i, etf in enumerate(SECTOR_ETFS)}
         return {
             "regime":            "neutral",
             "vix":               20.0,
-            "vix_level":         "normal",
+            "vix_level":         "unknown",
             "spy_vs_200ma_pct":  0.0,
             "spy_vs_50ma_pct":   0.0,
             "spy_trend":         "sideways",
@@ -230,7 +232,7 @@ def _fetch_regime() -> dict:
             "sector_status":     fallback_status,
             "total_sectors":     len(SECTOR_ETFS),
             "breadth":           "normal",
-            "bull_multiplier":   1.0,
-            "auto_exec_ok":      True,
-            "warning":           f"Regime check failed: {e}",
+            "bull_multiplier":   0.5,    # was 1.0 — fail defensive
+            "auto_exec_ok":      False,  # was True — fail defensive
+            "warning":           f"⚠ REGIME CHECK FAILED ({e}) — auto-exec PAUSED, sizing halved",
         }
