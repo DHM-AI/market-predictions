@@ -724,8 +724,11 @@ def close_position(ticker: str) -> dict:
             # Give Alpaca a moment to release the held shares
             if cancelled:
                 _time.sleep(0.5)
-        except Exception:
-            pass
+        except Exception as _ce:
+            # M-2 fix: if the WHOLE cancel-loop fails (Alpaca API down, auth
+            # broken), proceed-to-close at line 730 will also fail confusingly.
+            # One log line tells us why.
+            print(f"[close_position] {ticker} pre-cancel loop failed: {_ce}")
 
         # Close the position — retry once with a longer wait if first attempt fails
         try:
@@ -1394,7 +1397,10 @@ def trail_positions(
                 try:
                     client.cancel_order_by_id(str(existing_trail.id))
                     print(f"[AEGIS] {ticker} tightening trail: {existing_pct:.1f}% → {target_trail*100:.1f}%")
-                except Exception:
+                except Exception as _te:
+                    # M-2 fix: was silent `continue`. If the same ticker fails
+                    # to tighten over and over, we'd never see why.
+                    print(f"[AEGIS] {ticker} trail-tighten cancel failed: {_te} — leaving existing trail in place")
                     continue  # if cancel fails, skip to avoid duplicates
             else:
                 # No trailing stop — only activate if gain >= trigger
