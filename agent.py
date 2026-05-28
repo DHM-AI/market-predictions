@@ -150,11 +150,36 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
               f"(score≥{HIGH_SCORE_BYPASS_THRESHOLD}, Low confidence):")
         for _, _r in bypass_picks.iterrows():
             print(f"         · {_r['ticker']:6s}  score={_r['score']:.0f}  dir={_r.get('direction','?')}")
+    # ── Block-reason recorder ───────────────────────────────────────────────
+    # Persist WHY an eligible pick didn't execute so the dashboard can show
+    # the specific reason in its "ELIGIBLE — guard blocked" tooltip instead
+    # of the user digging through scan logs. Written to the trades table as a
+    # status="blocked" row (same pattern as vigil_alert/aegis_rescue/closed).
+    # These rows are excluded from FIFO matching, recent-trades, and
+    # partial-exit history (all of which filter by side/status).
+    _today_str = today
+    def _record_block(_tk, _reason):
+        try:
+            if db.db_available():
+                db.save_trade({
+                    "order_id": f"blocked-{_tk}-{_today_str}",
+                    "ticker":   _tk,
+                    "side":     "blocked",
+                    "dollar_amount": 0,
+                    "mode":     "LIVE" if os.getenv("ALPACA_LIVE_MODE", "").lower() == "true" else "PAPER",
+                    "status":   "blocked",
+                    "reason":   _reason[:300],
+                    "timestamp": datetime.now().isoformat(),
+                })
+        except Exception:
+            pass
+
     for _, row in auto_picks.iterrows():
         ticker    = row["ticker"]
         direction = row.get("direction", "bullish")
         dollar    = row.get("dollar_amount", 0)
         if dollar <= 0:
+            _record_block(ticker, "Kelly sizing returned $0 — no position size allocated")
             continue
 
         # Hard stop — enforce position + trade limits using in-run counters
@@ -169,18 +194,22 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
                 pass
         current_positions = len(open_positions) + _new_positions
         if current_positions >= MAX_OPEN_POSITIONS:
-            print(f"  {ticker}: BLOCKED — position limit reached "
-                  f"({current_positions}/{MAX_OPEN_POSITIONS})")
+            _msg = f"Position limit reached ({current_positions}/{MAX_OPEN_POSITIONS} open)"
+            print(f"  {ticker}: BLOCKED — {_msg}")
+            _record_block(ticker, _msg)
             continue
         if _new_trades >= MAX_DAILY_TRADES:
-            print(f"  {ticker}: BLOCKED — daily trade limit reached "
-                  f"({_new_trades}/{MAX_DAILY_TRADES})")
+            _msg = f"Daily trade limit reached ({_new_trades}/{MAX_DAILY_TRADES} today)"
+            print(f"  {ticker}: BLOCKED — {_msg}")
+            _record_block(ticker, _msg)
             break
 
         # Regime gate — skip mixed/bullish trades in bear regime
         if regime and not regime.get("auto_exec_ok", True):
             if direction in ("bullish", "mixed"):
-                print(f"  {ticker}: SKIPPED — bear regime active ({direction})")
+                _msg = f"Bear regime active — {direction} auto-exec paused"
+                print(f"  {ticker}: SKIPPED — {_msg}")
+                _record_block(ticker, _msg)
                 continue
 
         # Regime multiplier — reduce bullish position size when market is risky
@@ -194,6 +223,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         ok, guard_reason = check_trade(ticker, dollar, direction, open_positions, portfolio_value)
         if not ok:
             print(f"  {ticker}: BLOCKED by portfolio guard — {guard_reason}")
+            _record_block(ticker, guard_reason)
             continue
         if guard_reason != "ok":
             print(f"  {ticker}: {guard_reason}")
@@ -233,21 +263,24 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
                     _prior_long = _ct["realized_pnl"] > 0   # legacy fallback
                 _cur_bearish = direction == "bearish"
                 if _prior_long and _cur_bearish and _prior_pct > 0:
-                    print(f"  {ticker}: COOLDOWN — closed long +{_prior_pct:.1%} "
-                          f"{int(((_dt.now()-_closed_at).total_seconds()/3600))}h ago, "
-                          f"blocking bearish signal for {COOLDOWN_HOURS}h")
+                    _hrs = int(((_dt.now()-_closed_at).total_seconds()/3600))
+                    _cd_msg = (f"Cooldown — closed long +{_prior_pct:.1%} {_hrs}h ago, "
+                               f"blocking bearish signal for {COOLDOWN_HOURS}h")
+                    print(f"  {ticker}: COOLDOWN — {_cd_msg}")
                     dollar = 0  # skip this trade
                     break
                 if not _prior_long and not _cur_bearish and _prior_pct > 0:
-                    print(f"  {ticker}: COOLDOWN — closed short +{_prior_pct:.1%} "
-                          f"{int(((_dt.now()-_closed_at).total_seconds()/3600))}h ago, "
-                          f"blocking bullish signal for {COOLDOWN_HOURS}h")
+                    _hrs = int(((_dt.now()-_closed_at).total_seconds()/3600))
+                    _cd_msg = (f"Cooldown — closed short +{_prior_pct:.1%} {_hrs}h ago, "
+                               f"blocking bullish signal for {COOLDOWN_HOURS}h")
+                    print(f"  {ticker}: COOLDOWN — {_cd_msg}")
                     dollar = 0
                     break
         except Exception:
             pass
 
         if dollar <= 0:
+            _record_block(ticker, _cd_msg if '_cd_msg' in dir() else "Dollar amount reduced to $0")
             continue
 
         # ── Route: crypto vs equity ───────────────────────────────────────
