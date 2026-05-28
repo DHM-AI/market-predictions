@@ -14,39 +14,53 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from data.news import get_sentiment as get_av_yf_sentiment
 from data.reddit import get_reddit_sentiment_batch
 from data.rss import get_rss_sentiment_batch
+from data.stocktwits import get_stocktwits_sentiment_batch
 
 
+# Rebalanced 2026-05-28 — added StockTwits as 5th source.
+# StockTwits gets meaningful weight (0.20) because its Bull/Bear voting is
+# higher-signal than scraped Reddit text. Reddit dropped 0.30→0.25.
 SOURCE_WEIGHTS = {
-    "alpha_vantage": 0.35,
-    "yfinance": 0.15,
-    "reddit": 0.30,
-    "rss": 0.20,
+    "alpha_vantage": 0.30,
+    "yfinance":      0.10,
+    "reddit":        0.25,
+    "rss":           0.15,
+    "stocktwits":    0.20,
 }
 
 
-def _blend_scores(av_yf: dict, reddit: dict, rss: dict) -> dict:
+def _blend_scores(av_yf: dict, reddit: dict, rss: dict, stocktwits: dict) -> dict:
     av_score = av_yf.get("score", 0.0)
     rd_score = reddit.get("score", 0.0)
     rs_score = rss.get("score", 0.0)
+    st_score = stocktwits.get("score", 0.0)
 
     source = av_yf.get("source", "yfinance")
     av_w = SOURCE_WEIGHTS["alpha_vantage"] if source == "alpha_vantage" else 0.0
-    yf_w = SOURCE_WEIGHTS["yfinance"] if source != "alpha_vantage" else 0.0
+    yf_w = SOURCE_WEIGHTS["yfinance"]      if source != "alpha_vantage" else 0.0
     rd_w = SOURCE_WEIGHTS["reddit"]
     rs_w = SOURCE_WEIGHTS["rss"]
+    st_w = SOURCE_WEIGHTS["stocktwits"]
 
-    total_w = av_w + yf_w + rd_w + rs_w
-    blended = (av_score * (av_w + yf_w) + rd_score * rd_w + rs_score * rs_w) / total_w
+    total_w = av_w + yf_w + rd_w + rs_w + st_w
+    blended = (av_score * (av_w + yf_w)
+               + rd_score * rd_w
+               + rs_score * rs_w
+               + st_score * st_w) / total_w
 
     return {
-        "score": round(blended, 4),
-        "av_score": av_score,
-        "reddit_score": rd_score,
-        "rss_score": rs_score,
-        "reddit_mentions": reddit.get("mention_count", 0),
-        "reddit_upvotes": reddit.get("upvote_total", 0),
-        "rss_articles": rss.get("article_count", 0),
-        "source": f"blended({source}+reddit+rss)",
+        "score":               round(blended, 4),
+        "av_score":            av_score,
+        "reddit_score":        rd_score,
+        "rss_score":           rs_score,
+        "stocktwits_score":    st_score,
+        "reddit_mentions":     reddit.get("mention_count", 0),
+        "reddit_upvotes":      reddit.get("upvote_total", 0),
+        "rss_articles":        rss.get("article_count", 0),
+        "stocktwits_messages": stocktwits.get("message_count", 0),
+        "stocktwits_bull":     stocktwits.get("bullish_count", 0),
+        "stocktwits_bear":     stocktwits.get("bearish_count", 0),
+        "source":              f"blended({source}+reddit+rss+stocktwits)",
     }
 
 
@@ -65,6 +79,10 @@ def research_universe(tickers: list[str],
     # RSS batch (fetch feeds once, score all tickers)
     print("[research] Fetching RSS feeds...")
     rss_map = get_rss_sentiment_batch(tickers, max_workers=max_workers)
+
+    # StockTwits batch — cashtag-based trader sentiment with Bull/Bear voting
+    print("[research] Fetching StockTwits sentiment...")
+    stocktwits_map = get_stocktwits_sentiment_batch(tickers, max_workers=max_workers)
 
     # AV/yfinance per ticker (rate-limited, run with limited workers)
     print("[research] Fetching news sentiment (AV/yfinance)...")
@@ -87,6 +105,8 @@ def research_universe(tickers: list[str],
             av_map.get(ticker, {"score": 0.0, "source": "yfinance"}),
             reddit_map.get(ticker, {"score": 0.0, "mention_count": 0}),
             rss_map.get(ticker, {"score": 0.0, "article_count": 0}),
+            stocktwits_map.get(ticker, {"score": 0.0, "message_count": 0,
+                                        "bullish_count": 0, "bearish_count": 0}),
         )
 
     high_signal = sum(1 for v in blended.values() if abs(v["score"]) > 0.2)
