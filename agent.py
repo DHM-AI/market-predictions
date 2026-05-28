@@ -230,6 +230,15 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
 
         reason = explanations.get(ticker, "")[:120]
 
+        # ── Execution path tag (for win-rate tracking by gate type) ──────────
+        # model_bypass: score≥HIGH_SCORE_BYPASS_THRESHOLD with Low confidence
+        # rule_confirmed: qualified via score+confidence gate (rules also fired)
+        _is_model_bypass = (
+            row["score"] >= HIGH_SCORE_BYPASS_THRESHOLD and
+            row.get("confidence", "Low") not in _ALLOWED_CONFIDENCE
+        )
+        _execution_path = "model_bypass" if _is_model_bypass else "rule_confirmed"
+
         # ── Cooldown rule: block counter-direction after big winner ──────────
         # If a ticker closed with +5%+ gain recently, block the opposite direction
         # for COOLDOWN_HOURS to prevent the system fighting itself (e.g. long DELL
@@ -286,9 +295,11 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         # ── Route: crypto vs equity ───────────────────────────────────────
         if is_crypto(ticker) and ENABLE_CRYPTO:
             alpaca_sym = CRYPTO_YFINANCE_TO_ALPACA.get(ticker, ticker)
-            result = place_crypto_order(alpaca_sym, dollar, direction, reason)
+            result = place_crypto_order(alpaca_sym, dollar, direction, reason,
+                                        execution_path=_execution_path)
         else:
-            result = place_order(ticker, dollar, direction, reason)
+            result = place_order(ticker, dollar, direction, reason,
+                                 execution_path=_execution_path)
 
         results.append(result)
         print(f"  {ticker}: {result.get('status')} ${dollar:.0f} {direction}")

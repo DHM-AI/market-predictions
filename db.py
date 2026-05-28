@@ -215,6 +215,8 @@ _TRADE_COLS = {
     # ── Existing columns ────────────────────────────────────
     "order_id", "ticker", "side", "dollar_amount",
     "mode", "status", "reason", "timestamp",
+    # ── Added 2026-05-28 ────────────────────────────────────
+    "execution_path",  # "rule_confirmed" | "model_bypass" | "" (blocked/closed rows)
     # ── Add with ALTER TABLE below, then uncomment ──────────
     # "qty", "entry_price", "stop_loss", "take_profit",
 }

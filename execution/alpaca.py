@@ -183,7 +183,7 @@ def _check_daily_loss_limit() -> bool:
 
 
 def place_order(ticker: str, dollar_amount: float, direction: str,
-                reason: str = "") -> dict:
+                reason: str = "", execution_path: str = "") -> dict:
     """
     Place a BRACKET ORDER: entry + stop loss + take profit in one shot.
 
@@ -316,6 +316,7 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
             "mode":          mode,
             "timestamp":     datetime.now().isoformat(),
             "reason":        reason,
+            "execution_path": execution_path,
         }
 
         try:
@@ -368,7 +369,7 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
                         "take_profit": limit_price,
                         "dollar_amount": round(qty * actual_price, 2),
                         "mode": mode, "timestamp": datetime.now().isoformat(),
-                        "reason": reason,
+                        "reason": reason, "execution_path": execution_path,
                     }
                     try:
                         import db
@@ -1569,7 +1570,8 @@ def cancel_all_orders() -> int:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def place_crypto_order(alpaca_symbol: str, dollar_amount: float,
-                       direction: str, reason: str = "") -> dict:
+                       direction: str, reason: str = "",
+                       execution_path: str = "") -> dict:
     """
     Place a crypto market order via Alpaca.
 
@@ -1647,6 +1649,7 @@ def place_crypto_order(alpaca_symbol: str, dollar_amount: float,
             "mode":          mode,
             "timestamp":     datetime.now().isoformat(),
             "reason":        reason,
+            "execution_path": execution_path,
         }
         try:
             import db
