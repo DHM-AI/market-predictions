@@ -30,26 +30,40 @@ def _build_prompt(row: dict) -> str:
     )
 
 
-_REFUSAL_MARKERS = (
-    "i won't", "i will not", "i can't", "i cannot",
-    "i need to flag", "i need to point out",
+# SEC-402 audit fix: split into HIGH-CONFIDENCE (refusal-only phrases — fire
+# on any single match) and SOFT (verbs that could appear in legitimate bearish
+# analysis like "I cannot find any signals" — require multiple matches OR
+# combination with a hard marker).
+_REFUSAL_HARD = (
     "appears to be an attempt", "appears to be a prompt",
     "system directive", "system prompt",
-    "i should not", "ignore this", "decline to",
+    "i need to flag", "i need to point out",
+    "ignore this prompt", "ignore this directive",
+    "attempt to inject", "prompt injection",
+)
+_REFUSAL_SOFT = (
+    "i won't", "i will not", "i can't", "i cannot",
+    "i should not", "i'm not able to", "i am not able to",
+    "decline to",
 )
 
 
 def _looks_like_refusal(text: str) -> bool:
     """True if Claude's response looks like a prompt-injection refusal
-    rather than an actual analysis. Bug fix 2026-05-28: ORACLE directives
-    used to be framed as 'ORACLE system directive: ...' which Claude
-    interpreted as a prompt-injection attempt and refused. The refusal
-    text then leaked into trade reasons in Supabase + Slack."""
+    rather than an actual analysis.
+
+    Two-tier match to avoid false-positives on legitimate bearish analysis
+    (e.g. 'I cannot find any bullish signals here — RSI is neutral'):
+      - HARD markers fire on a single match (refusal-specific phrasings)
+      - SOFT markers require ≥2 matches OR co-occurrence with a hard marker
+    """
     if not text:
         return False
-    lower = text.lower()[:300]   # only check the opening — substantive
-                                  # analysis won't have these phrases up front
-    return any(m in lower for m in _REFUSAL_MARKERS)
+    lower = text.lower()[:300]
+    if any(m in lower for m in _REFUSAL_HARD):
+        return True
+    soft_hits = sum(1 for m in _REFUSAL_SOFT if m in lower)
+    return soft_hits >= 2
 
 
 def explain_picks(scored_df, top_n: int = TOP_N_CLAUDE_ANALYSIS,
