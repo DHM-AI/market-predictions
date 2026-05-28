@@ -323,6 +323,23 @@ def run_scan(send_email: bool = True,
     if _effective_min_score != _BASE_MIN_SCORE:
         print(f"[ORACLE] Adjusted auto-execute threshold: {_BASE_MIN_SCORE} → {_effective_min_score}")
 
+    # ── 0a. AEGIS pre-scan sweep ─────────────────────────────────
+    # H-11 fix: previously AEGIS only ran AFTER the scan finished. If the scan
+    # hung on yfinance / Alpaca data, AEGIS never ran on this trigger — the
+    # exact failure mode the piggyback was supposed to prevent. Now it runs
+    # FIRST so trailing stops + naked rescue always get a touch every cycle.
+    try:
+        from execution.alpaca import trail_positions as _trail_pre, is_configured as _alp_ok_pre
+        if _alp_ok_pre():
+            print(f"[AEGIS pre-scan] Trailing stop + partial exit sweep...")
+            _pre_results = _trail_pre()
+            if _pre_results:
+                print(f"[AEGIS pre-scan] {len(_pre_results)} actions: "
+                      f"{', '.join(r['ticker'] for r in _pre_results[:8])}"
+                      + (f" +{len(_pre_results)-8} more" if len(_pre_results) > 8 else ""))
+    except Exception as _pe:
+        print(f"[AEGIS pre-scan] error: {_pe}")
+
     # ── 0. Market Regime ─────────────────────────────────────────
     print(f"[REGIME] VIX + SPY trend + sector breadth")
     _neutral_regime = {"regime":"neutral","vix":20.0,"vix_level":"normal",

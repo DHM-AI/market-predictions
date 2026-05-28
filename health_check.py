@@ -113,9 +113,13 @@ try:
         if n == 0:
             # Check if market is open today (weekday)
             if datetime.today().weekday() < 5:
-                # Only warn if past 1 PM ET (scans should have run by then)
-                # Before 1 PM = timing issue from manual run, not a real problem
-                now_et_hour = (datetime.utcnow().hour - 4) % 24   # UTC-4 (EDT)
+                # H-1 fix: use ET timezone correctly via zoneinfo (DST-aware)
+                # instead of hardcoded UTC-4 (which is wrong in winter).
+                try:
+                    from zoneinfo import ZoneInfo
+                    now_et_hour = datetime.now(ZoneInfo("America/New_York")).hour
+                except Exception:
+                    now_et_hour = (datetime.utcnow().hour - 4) % 24   # fallback
                 if now_et_hour >= 13:
                     report.add("Supabase — Today's Predictions", "WARN",
                                f"No predictions written for {today} after 1 PM ET — scans may be failing")

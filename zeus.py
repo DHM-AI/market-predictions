@@ -110,8 +110,11 @@ try:
             _client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY,
                                     paper=not ALPACA_LIVE_MODE)
             # Fetch open orders (includes take-profit legs)
+            # H-4 fix: explicit limit=500. SDK default of 50 silently truncated
+            # the list on busy days; Check 1 (stop coverage) flagged false
+            # positives and auto-fix produced duplicate stops.
             _open_orders = _client.get_orders(
-                GetOrdersRequest(status=QueryOrderStatus.OPEN))
+                GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500))
             # Fetch all recent orders to catch "held" bracket stop-loss legs
             _after = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00Z")
             _all_recent = _client.get_orders(
@@ -195,6 +198,22 @@ else:
         else:
             report.add("Stop Loss Coverage", "WARN",
                        f"Missing stops auto-fixed for: {fixed}")
+            # H-10 fix: re-fetch alpaca_orders so subsequent checks (esp.
+            # Check-7 "deep underwater no stop") don't double-FAIL on the same
+            # tickers we just auto-fixed.
+            try:
+                _refresh = _client.get_orders(GetOrdersRequest(
+                    status=QueryOrderStatus.ALL, after=_after, limit=500))
+                _new_combined = list(_open_orders) + list(_refresh)
+                seen_ids = set(); _dedup = []
+                for o in _new_combined:
+                    if o.id in seen_ids: continue
+                    seen_ids.add(o.id)
+                    _dedup.append(o)
+                alpaca_orders = _dedup
+                print(f"[ZEUS] Refreshed orders after auto-fix: {len(alpaca_orders)} active")
+            except Exception as _re:
+                print(f"[ZEUS] Could not refresh orders: {_re}")
     else:
         report.add("Stop Loss Coverage", "PASS",
                    f"All {len(open_tickers)} position(s) have stop loss orders")

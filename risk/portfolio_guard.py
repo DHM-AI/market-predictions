@@ -223,10 +223,19 @@ def check_trade(
 
 
 def increment_daily_count():
-    """Call this after a trade is successfully placed."""
+    """Call this after a trade is successfully placed.
+
+    H-5 fix: counter resets on ET midnight (not UTC). On CI, datetime.today()
+    returns UTC — counter rolled over at 20:00 UTC = 4 PM ET, letting
+    afternoon trades stack on top of morning trades for the same trading day.
+    """
     global _daily_trade_count, _daily_trade_date
     from datetime import datetime
-    today = datetime.today().strftime("%Y-%m-%d")
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except Exception:
+        today = datetime.today().strftime("%Y-%m-%d")   # fallback
     if _daily_trade_date != today:
         _daily_trade_count = 0
         _daily_trade_date  = today

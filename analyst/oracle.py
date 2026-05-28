@@ -187,8 +187,17 @@ def run() -> dict:
             sigs.extend([x.strip() for x in str(s).split(";")])
         return ", ".join(s for s, _ in Counter(sigs).most_common(n))
 
+    # H-6 fix: ORACLE runs at 10 PM ET = 2 AM UTC NEXT DAY. datetime.today()
+    # returns UTC date which is TOMORROW relative to the trading day this run
+    # actually summarizes. Use ET date so the label matches the data.
+    try:
+        from zoneinfo import ZoneInfo
+        _et_today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except Exception:
+        _et_today = datetime.today().strftime("%Y-%m-%d")
+
     record = {
-        "week_of":            datetime.today().strftime("%Y-%m-%d"),
+        "week_of":            _et_today,
         "total_predictions":  len(evaluated),
         "hit_rate":           round(hit_rate, 4),
         "top_hit_signals":    top_signals(hits),

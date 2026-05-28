@@ -361,8 +361,32 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
                     return result
             except Exception as retry_err:
                 print(f"[APEX] Bracket retry failed: {retry_err}")
-        print(f"[APEX] Bracket order failed: {e}. Falling back to simple order.")
-        return _place_simple_order(ticker, dollar_amount, side, mode, reason)
+        # H-7 fix: do NOT blindly fall back to a NAKED simple order on every
+        # bracket failure. Only fall back for KNOWN-RECOVERABLE errors. For
+        # anything else, refuse and Slack-alert — naked positions are worse
+        # than missed trades.
+        _err_lc = str(e).lower()
+        _recoverable = (
+            "base_price" in _err_lc
+            or "stop_loss"  in _err_lc and "must be" in _err_lc
+            or "take_profit" in _err_lc and "must be" in _err_lc
+        )
+        if _recoverable:
+            print(f"[APEX] Bracket failed ({e}) — recoverable, falling back to simple order.")
+            return _place_simple_order(ticker, dollar_amount, side, mode, reason)
+        # Non-recoverable — refuse and alert
+        print(f"[APEX] Bracket failed ({e}) — NOT falling back (would create naked position).")
+        try:
+            from alerts.slack import _post
+            _post({"text": (
+                f"🚨 *Bracket order REFUSED — {ticker}*\n"
+                f">Error: `{e}`\n"
+                f">Did NOT fall back to simple order (would leave position unprotected)."
+            )})
+        except Exception:
+            pass
+        return {"status": "rejected_bracket_unknown", "ticker": ticker,
+                "reason": f"Bracket failed with non-recoverable error: {e}"}
 
 
 def _place_simple_order(ticker: str, dollar_amount: float, side: str,
@@ -372,6 +396,12 @@ def _place_simple_order(ticker: str, dollar_amount: float, side: str,
     For SELL (short) orders we always use qty — Alpaca rejects notional shorts.
     For BUY orders we prefer notional, fall back to qty if needed.
     """
+    # CRITICAL audit C-10: daily-loss kill switch was only checked in place_order.
+    # Fallback paths bypassed it — bracket failure could keep bleeding capital
+    # past the documented 5% hard limit. Check here too.
+    if not _check_daily_loss_limit():
+        return {"status": "rejected_loss_limit",
+                "reason": "Daily loss limit hit — simple-order path also halted"}
     try:
         from alpaca.trading.requests import MarketOrderRequest
         from alpaca.trading.enums import OrderSide, TimeInForce
@@ -471,15 +501,17 @@ def get_positions() -> list[dict]:
             entry = float(p.avg_entry_price)
             sym   = p.symbol
             known = sl_tp_map.get(sym, {})
-            # Fall back to computing from config constants when Alpaca doesn't expose the leg
+            # H-2 fix: track whether SL/TP came from the broker or was COMPUTED
+            # as a fallback. Dashboard / EOD report should render "computed"
+            # differently so users don't see a fake number labelled as a real stop.
             is_short = "short" in str(getattr(p, "side", "")).lower()
+            sl_from_broker = "stop_loss"   in known
+            tp_from_broker = "take_profit" in known
             if is_short:
-                # For short positions: SL is above entry (buy-to-cover), TP is below entry
-                sl = known.get("stop_loss")  or round(entry * (1 + KELLY_LOSS_PCT), 2)
+                sl = known.get("stop_loss")   or round(entry * (1 + KELLY_LOSS_PCT), 2)
                 tp = known.get("take_profit") or round(entry * (1 - MOVE_TARGET_PCT), 2)
             else:
-                # For long positions: SL is below entry, TP is above entry
-                sl = known.get("stop_loss")  or round(entry * (1 - KELLY_LOSS_PCT), 2)
+                sl = known.get("stop_loss")   or round(entry * (1 - KELLY_LOSS_PCT), 2)
                 tp = known.get("take_profit") or round(entry * (1 + MOVE_TARGET_PCT), 2)
             result.append({
                 "ticker":            sym,
@@ -492,6 +524,8 @@ def get_positions() -> list[dict]:
                 "current_price":     float(p.current_price),
                 "stop_loss":         sl,
                 "take_profit":       tp,
+                "stop_loss_source":  "broker" if sl_from_broker else "computed",
+                "take_profit_source":"broker" if tp_from_broker else "computed",
                 "is_trailing":       sym in trailing_set,
             })
         return result
@@ -821,16 +855,8 @@ def trail_positions(
     if not is_configured():
         return []
 
-    # Load partial exit history per ticker — {ticker: {t1, t2, t1_qty}}
-    # Persisted in Supabase so it survives GitHub Actions restarts.
-    partial_history: dict = {}
-    if ENABLE_PARTIAL_EXIT:
-        try:
-            from db import get_partial_exit_history
-            partial_history = get_partial_exit_history()
-        except Exception as _dbe:
-            print(f"[AEGIS] Could not load partial exit history: {_dbe}")
-
+    if not is_configured():
+        pass  # is_configured() check already at line 821 — defensive
     results = []
     try:
         from alpaca.trading.requests import (GetOrdersRequest,
@@ -844,6 +870,18 @@ def trail_positions(
         positions = get_positions()
         if not positions:
             return []
+
+        # CRITICAL audit C-6: load partial-exit history filtered to currently-
+        # open tickers ONLY. Otherwise a stale t1/t2 record from a CLOSED prior
+        # position in the same ticker makes the new position skip its scale-out.
+        _open_tickers = {p["ticker"] for p in positions}
+        partial_history: dict = {}
+        if ENABLE_PARTIAL_EXIT:
+            try:
+                from db import get_partial_exit_history
+                partial_history = get_partial_exit_history(open_tickers=_open_tickers)
+            except Exception as _dbe:
+                print(f"[AEGIS] Could not load partial exit history: {_dbe}")
 
         # Build map: ticker → active order list
         # Must include HELD orders — bracket stop/TP children are held, not open.
@@ -941,10 +979,27 @@ def trail_positions(
                         else:
                             new_stop = cur_stop
                         stop_side = OrderSide.BUY
+                    # H-8 fix: Alpaca rejects fractional-qty stop orders. For
+                    # fractional positions, use whole-share qty (floor) for the
+                    # stop; the fractional dust is unprotected but small enough
+                    # that the dollar risk is acceptable, and at least the bulk
+                    # of the position gets covered (previously it stayed fully
+                    # naked forever because every retry failed).
+                    import math as _math
+                    _is_fractional = qty != int(qty)
+                    _stop_qty = int(_math.floor(qty)) if _is_fractional else qty
+                    if _stop_qty <= 0:
+                        # Pure-fractional (e.g. 0.7 BTC) — close instead of stop
+                        try:
+                            print(f"[AEGIS] {ticker} pure-fractional naked → close_position")
+                            close_position(ticker)
+                        except Exception as _cf:
+                            print(f"[AEGIS] {ticker} fractional close failed: {_cf}")
+                        continue
                     try:
                         from alpaca.trading.requests import StopOrderRequest as _SOR
                         _rescue_req = _SOR(
-                            symbol=ticker, qty=qty, side=stop_side,
+                            symbol=ticker, qty=_stop_qty, side=stop_side,
                             stop_price=new_stop, time_in_force=TimeInForce.GTC,
                         )
                         try:
@@ -952,7 +1007,8 @@ def trail_positions(
                         except Exception:
                             _rescue_req.time_in_force = TimeInForce.DAY
                             _rescue_ord = client.submit_order(_rescue_req)
-                        print(f"[AEGIS] {ticker} was NAKED — placed rescue stop @ ${new_stop:.2f}")
+                        _frac_note = f" (fractional dust {qty - _stop_qty:.4f} uncovered)" if _is_fractional else ""
+                        print(f"[AEGIS] {ticker} was NAKED — placed rescue stop @ ${new_stop:.2f}{_frac_note}")
                         results.append({
                             "ticker": ticker, "pct_gain": round(pct_gain, 2),
                             "trail_pct": KELLY_LOSS_PCT, "order_id": str(_rescue_ord.id),
@@ -1024,19 +1080,36 @@ def trail_positions(
                     remain_qty = round(_abs_qty - close_qty, 4)
                     exit_side  = OrderSide.SELL if is_long else OrderSide.BUY
 
-                    # ── Snapshot existing stops BEFORE cancelling — so we can
-                    # restore them if the partial sell fails. Prevents the
-                    # "stops gone + sell failed = naked position" disaster.
+                    # ── Snapshot existing stops AND bracket TP legs BEFORE
+                    # cancelling. Restore on failure. CRITICAL audit C-7: was
+                    # only cancelling stops — the bracket's LIMIT TP leg was
+                    # left at original qty, so when remaining tranche hits TP
+                    # it tries to sell MORE shares than held → Alpaca rejects
+                    # → uncovered position.
                     _stop_snapshots = []
+                    _tp_snapshots   = []
                     for o in ticker_orders:
                         otype = str(getattr(o, "type", "")).lower()
-                        if "stop" in otype and is_active_order(o):
+                        if not is_active_order(o):
+                            continue
+                        if "stop" in otype:
                             _stop_snapshots.append({
                                 "type":  otype,
                                 "qty":   float(o.qty) if o.qty else _abs_qty,
                                 "side":  o.side,
                                 "stop_price":    float(o.stop_price) if o.stop_price else None,
                                 "trail_percent": float(getattr(o, "trail_percent", 0) or 0),
+                            })
+                            try:
+                                client.cancel_order_by_id(str(o.id))
+                            except Exception:
+                                pass
+                        elif otype == "limit" and getattr(o, "parent_order_id", None):
+                            # Bracket TP leg — also needs resize after partial
+                            _tp_snapshots.append({
+                                "qty":         float(o.qty) if o.qty else _abs_qty,
+                                "side":        o.side,
+                                "limit_price": float(o.limit_price) if o.limit_price else None,
                             })
                             try:
                                 client.cancel_order_by_id(str(o.id))
@@ -1051,7 +1124,10 @@ def trail_positions(
                     try:
                         close_order = client.submit_order(mreq)
                     except Exception as _sell_err:
-                        # CRITICAL: restore the stop we just cancelled
+                        # CRITICAL: restore the stops AND TP we just cancelled.
+                        # H-9 fix: restore trailing stops as TrailingStopOrderRequest
+                        # NEVER as a fixed StopOrderRequest with snapshotted price —
+                        # snapshot captured peak-derived stop_price which is now stale.
                         for _snap in _stop_snapshots:
                             try:
                                 if "trailing" in _snap["type"] and _snap["trail_percent"]:
@@ -1061,6 +1137,11 @@ def trail_positions(
                                         time_in_force=TimeInForce.GTC,
                                         trail_percent=_snap["trail_percent"],
                                     )
+                                elif "trailing" in _snap["type"]:
+                                    # Trailing but no trail_percent snapshot — skip
+                                    # rather than degrade to a stale fixed stop.
+                                    print(f"[AEGIS] {ticker} skipped trailing restore (no trail_percent)")
+                                    continue
                                 else:
                                     _restore = StopOrderRequest(
                                         symbol=ticker, qty=_snap["qty"], side=_snap["side"],
@@ -1074,7 +1155,17 @@ def trail_positions(
                                     client.submit_order(_restore)
                                 except Exception:
                                     pass
-                        print(f"[AEGIS] {ticker} {tier_name} sell failed: {_sell_err} — restored stops")
+                        # Also restore TP legs at ORIGINAL qty (sell didn't happen)
+                        for _tp in _tp_snapshots:
+                            try:
+                                from alpaca.trading.requests import LimitOrderRequest as _LOR
+                                _tpr = _LOR(symbol=ticker, qty=_tp["qty"], side=_tp["side"],
+                                            limit_price=_tp["limit_price"],
+                                            time_in_force=TimeInForce.GTC)
+                                client.submit_order(_tpr)
+                            except Exception:
+                                pass
+                        print(f"[AEGIS] {ticker} {tier_name} sell failed: {_sell_err} — restored stops+TP")
                         raise
 
                     # T1 moves remaining stop to breakeven
@@ -1091,6 +1182,23 @@ def trail_positions(
                         except Exception:
                             be_req.time_in_force = TimeInForce.DAY
                             client.submit_order(be_req)
+
+                    # CRITICAL audit C-7: reissue bracket TP sized to remain_qty.
+                    # Was leaving orphan TP at original qty → would over-sell on
+                    # exit and Alpaca would reject → no TP coverage on the tranche.
+                    if remain_qty > 0 and _tp_snapshots:
+                        try:
+                            from alpaca.trading.requests import LimitOrderRequest as _LOR
+                            _tp0 = _tp_snapshots[0]   # all bracket TPs share the price
+                            _tp_req = _LOR(
+                                symbol=ticker, qty=remain_qty, side=_tp0["side"],
+                                limit_price=_tp0["limit_price"],
+                                time_in_force=TimeInForce.GTC,
+                            )
+                            client.submit_order(_tp_req)
+                            print(f"[AEGIS] {ticker} TP resized to {remain_qty} @ ${_tp0['limit_price']:.2f}")
+                        except Exception as _tpe:
+                            print(f"[AEGIS] {ticker} could not reissue TP at remain_qty: {_tpe}")
 
                     # Log to Supabase — status encodes which tier fired
                     try:
@@ -1344,21 +1452,28 @@ def trail_positions(
 
 
 def cancel_all_orders() -> int:
-    """Cancel all open orders. Returns count cancelled."""
+    """Cancel all active orders (open + new + held + accepted + pending_new).
+
+    H-3 fix: was OPEN-only — bracket protective legs in HELD survived,
+    causing orphan orders to accumulate after emergency cancel-all.
+    """
     if not is_configured():
         return 0
     try:
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
         client = _get_client()
-        orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        orders = [o for o in client.get_orders(GetOrdersRequest(
+                       status=QueryOrderStatus.ALL, limit=500))
+                  if is_active_order(o)]
         for o in orders:
             try:
                 client.cancel_order_by_id(str(o.id))
-            except Exception:
-                pass
+            except Exception as _e:
+                print(f"[cancel_all] {o.symbol} {o.id}: {_e}")
         return len(orders)
-    except Exception:
+    except Exception as _e:
+        print(f"[cancel_all] failed: {_e}")
         return 0
 
 
@@ -1379,6 +1494,11 @@ def place_crypto_order(alpaca_symbol: str, dollar_amount: float,
     from config import KELLY_LOSS_PCT, MOVE_TARGET_PCT
     if not is_configured():
         return {"status": "skipped", "reason": "Alpaca not configured"}
+
+    # CRITICAL audit C-10: daily-loss kill switch also gates crypto.
+    if not _check_daily_loss_limit():
+        return {"status": "rejected_loss_limit",
+                "reason": "Daily loss limit hit — crypto path also halted"}
 
     mode = "LIVE" if is_live_mode() else "PAPER"
     side = "buy" if direction in ("bullish", "long") else "sell"
@@ -1479,6 +1599,11 @@ def place_iron_butterfly(ticker: str, expiry_yymmdd: str,
 
     if not is_configured():
         return {"status": "skipped", "reason": "Alpaca not configured"}
+
+    # CRITICAL audit C-10: options also gated by daily loss limit.
+    if not _check_daily_loss_limit():
+        return {"status": "rejected_loss_limit",
+                "reason": "Daily loss limit hit — options path also halted"}
 
     mode = "LIVE" if is_live_mode() else "PAPER"
 

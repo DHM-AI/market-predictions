@@ -59,8 +59,10 @@ def position_size(win_prob: float,
     bankroll = bankroll or BANKROLL
     f = kelly_fraction(win_prob)
 
+    # M-4 fix: was hardcoded f / 2.0 — ignored the configurable KELLY_FRACTION.
+    # Now actually honors config (default 0.5 = half-Kelly).
     if half_kelly:
-        f = f / 2.0
+        f = f * KELLY_FRACTION
 
     # Hard cap at MAX_POSITION_PCT
     f = min(f, MAX_POSITION_PCT)

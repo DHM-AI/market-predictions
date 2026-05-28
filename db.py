@@ -222,14 +222,20 @@ def load_trades() -> list[dict]:
     return result.data or []
 
 
-def get_partial_exit_history(lookback_days: int = 90) -> dict:
+def get_partial_exit_history(lookback_days: int = 90,
+                              open_tickers: set | None = None) -> dict:
     """
     Return {ticker: {'t1': bool, 't2': bool, 't1_qty': float}} for tickers that
     have had partial exits within the lookback window.
 
     Used by AEGIS to know which tiers have already fired per ticker so it
-    doesn't double-fire. 't1_qty' is the qty closed in Tier 1 — Tier 2 closes
-    the same qty (=33% of the original position).
+    doesn't double-fire.
+
+    CRITICAL audit C-6: A partial-exit record for ticker X from a position that
+    has SINCE BEEN CLOSED was making a NEW position in X skip its T1/T2
+    scale-out (real-money risk). Fix: only count exits that occurred AFTER the
+    most recent fully-closed trade for that ticker (i.e., still apply to the
+    currently-open position). If no open position for ticker, drop history.
     """
     history: dict = {}
     try:
@@ -241,9 +247,34 @@ def get_partial_exit_history(lookback_days: int = 90) -> dict:
             .gte("timestamp", cutoff)
             .execute()
         )
+        # Find the most recent "position closed" timestamp per ticker so we
+        # only count partials AFTER that point as still-active.
+        last_close: dict[str, str] = {}
+        try:
+            closes = (
+                _client().table("trades")
+                .select("ticker, status, timestamp")
+                .in_("status", ["closed", "sl_hit", "tp_hit", "manual_close", "trail_hit"])
+                .gte("timestamp", cutoff)
+                .execute()
+            )
+            for c in (closes.data or []):
+                tk = c["ticker"]
+                ts = c["timestamp"]
+                if ts > last_close.get(tk, ""):
+                    last_close[tk] = ts
+        except Exception:
+            pass   # if close lookup fails, fall through to old behavior
+
         for r in (result.data or []):
             tk = r["ticker"]
             st = r["status"]
+            # Drop history if ticker is not currently held (no open position)
+            if open_tickers is not None and tk not in open_tickers:
+                continue
+            # Drop history if a close happened AFTER this partial (different position)
+            if r["timestamp"] < last_close.get(tk, ""):
+                continue
             history.setdefault(tk, {"t1": False, "t2": False, "t1_qty": 0.0})
             # Legacy "partial_exit" entries count as Tier 1 fired
             if st in ("partial_exit", "partial_exit_t1"):
