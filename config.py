@@ -92,6 +92,10 @@ MIN_SCORE_TO_ALERT  = 50
 TOP_N_CLAUDE_ANALYSIS = 5
 MOVE_TARGET_PCT     = 0.20   # 20% ceiling TP — trailing stops handle normal exits at 3-7%
 
+# ── Day trade bracket parameters (tighter than swing) ────────────────────────
+DAY_TRADE_STOP_PCT   = 0.015  # -1.5% stop (tighter than swing's -3%)
+DAY_TRADE_TARGET_PCT = 0.03   # +3% take profit (quick win, closed by DUSK at 3:50 PM)
+
 # ── Model blending weights ────────────────────────────────────────────────────
 XGB_WEIGHT       = 0.70
 SENTIMENT_WEIGHT = 0.30

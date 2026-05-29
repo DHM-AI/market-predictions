@@ -46,12 +46,25 @@ def _determine_direction(technicals: dict, sentiment: dict) -> str:
 def _determine_duration(technicals: dict, earnings_days: int | None) -> str:
     if earnings_days is not None and 0 <= earnings_days <= EARNINGS_PROXIMITY_DAYS:
         return "1-3d (earnings catalyst)"
+
     bb = technicals["bb"]["triggered"]
     atr = technicals["atr"]["triggered"]
-    if bb and atr:
-        return "5-7d (squeeze setup)"
     rsi_extreme = technicals["rsi"]["extreme"]
     vol_surge = technicals["vol"]["triggered"]
+
+    # DAY trade: very high volume surge + strong directional RSI + no squeeze setup.
+    # These are fast-moving names that can deliver a quick 2-3% in a single session.
+    # DUSK will close them at 3:50 PM ET if still open.
+    vol_raw   = technicals.get("vol", {}).get("ratio", 1.0)   # current vol / avg vol
+    rsi_val   = technicals.get("rsi", {}).get("value", 50)
+    momentum  = technicals.get("momentum", {}).get("triggered", False)
+    extreme_vol = vol_raw >= 3.0           # 3× average volume — real intraday momentum
+    rsi_strong  = rsi_val >= 62 or rsi_val <= 38   # directional bias without being exhausted
+    if extreme_vol and rsi_strong and not bb:   # BB squeeze = hold longer; no squeeze = take quick
+        return "1d (day trade)"
+
+    if bb and atr:
+        return "5-7d (squeeze setup)"
     if rsi_extreme and vol_surge:
         return "2-3w (momentum surge)"
     return "5-7d (default)"

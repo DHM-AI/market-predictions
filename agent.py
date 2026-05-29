@@ -178,6 +178,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         ticker    = row["ticker"]
         direction = row.get("direction", "bullish")
         dollar    = row.get("dollar_amount", 0)
+        duration  = row.get("duration", "")
         if dollar <= 0:
             _record_block(ticker, "Kelly sizing returned $0 — no position size allocated")
             continue
@@ -299,7 +300,8 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
                                         execution_path=_execution_path)
         else:
             result = place_order(ticker, dollar, direction, reason,
-                                 execution_path=_execution_path)
+                                 execution_path=_execution_path,
+                                 duration=duration)
 
         results.append(result)
         print(f"  {ticker}: {result.get('status')} ${dollar:.0f} {direction}")
