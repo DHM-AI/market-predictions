@@ -177,7 +177,9 @@ PARTIAL_EXIT_FRACTION    = PARTIAL_EXIT_TIER1_FRACTION
 # the rule signals can't confirm (no BB squeeze / no compression — just
 # "stock going up"). Set bypass ABOVE the score that bit RYOJ (78) to keep
 # the RYOJ guardrail intact.
-AUTO_EXECUTE_MIN_SCORE      = 70
+AUTO_EXECUTE_MIN_SCORE      = 75   # raised from 70 — confidence labels now based on
+                                   # blended XGB score so Medium starts at 65;
+                                   # raising the floor keeps execution selective
 HIGH_SCORE_BYPASS_THRESHOLD = 85   # Low-conf trades only if model is REALLY sure
 
 # ── Paths ─────────────────────────────────────────────────────────────────────

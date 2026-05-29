@@ -123,6 +123,22 @@ def predict_universe(
             meta["score"] = round(blended, 1)
             meta["xgb_prob"] = round(xgb_prob, 4)        # calibrated if available
             meta["calibrated"] = calibrator_available()  # transparency flag
+
+            # Override confidence using the BLENDED score, not the raw rule score.
+            # scorer.py sets confidence from raw_score (rule signals only), which
+            # always reads "Low" in bull trends when no squeeze patterns fire.
+            # The blended XGB score is the authoritative confidence signal.
+            #   ≥ 80  → High   (model strongly confident)
+            #   ≥ 65  → Medium (model moderately confident)
+            #   < 65  → Low
+            blended_score = meta["score"]
+            if blended_score >= 80:
+                meta["confidence"] = "High"
+            elif blended_score >= 65:
+                meta["confidence"] = "Medium"
+            else:
+                meta["confidence"] = "Low"
+
             rows.append(meta)
         except Exception as _e:
             skipped_errors += 1
