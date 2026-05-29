@@ -667,6 +667,22 @@ def trail_positions(
                     print(f"[AEGIS] {ticker}: could not place trailing stop — skipping")
                     continue
 
+                # If we cancelled a bracket parent, the TP child was also cancelled.
+                # Reissue the TP as a standalone limit order at the captured price.
+                if _tp_price_to_reissue:
+                    try:
+                        from alpaca.trading.requests import LimitOrderRequest as _LOR
+                        _tp_side = OrderSide.SELL if is_long else OrderSide.BUY
+                        _tp_req = _LOR(
+                            symbol=ticker, qty=qty, side=_tp_side,
+                            limit_price=_tp_price_to_reissue,
+                            time_in_force=TimeInForce.GTC,
+                        )
+                        client.submit_order(_tp_req)
+                        print(f"[AEGIS] {ticker} reissued TP @ ${_tp_price_to_reissue:.2f} (bracket parent was cancelled)")
+                    except Exception as _tpe:
+                        print(f"[AEGIS] {ticker} could not reissue TP after bracket cancel: {_tpe}")
+
                 mode = "LIVE" if is_live_mode() else "PAPER"
                 print(f"[AEGIS] [{mode}] {ticker} up {pct_gain:.1f}% → "
                       f"trailing stop {trail*100:.0f}% activated "
