@@ -1416,16 +1416,24 @@ def trail_positions(
                 None
             )
             if existing_trail:
-                # Already trailing — check if we need to tighten
+                # Already trailing — check if we need to tighten.
                 existing_pct = float(getattr(existing_trail, "trail_percent", 0) or 0)
-                if existing_pct == 0 or target_trail >= existing_pct / 100:
-                    # No tightening needed
-                    print(f"[AEGIS] {ticker} trailing at {existing_pct:.1f}% — no tighten needed")
+                # If Alpaca returned trail_percent=0 (can happen when order was placed
+                # with trail_price dollar amount), treat it as the widest possible trail
+                # so we always tighten to the correct level.
+                if existing_pct == 0:
+                    effective_pct = 100.0   # assume worst-case, force tighten
+                    print(f"[AEGIS] {ticker} trail_percent=0 from Alpaca (dollar trail?) — forcing tighten to {target_trail*100:.1f}%")
+                else:
+                    effective_pct = existing_pct
+                if target_trail >= effective_pct / 100:
+                    # Already at or tighter than target — no action
+                    print(f"[AEGIS] {ticker} trailing at {effective_pct:.1f}% · target {target_trail*100:.1f}% — no tighten needed")
                     continue
                 # Tighten: cancel old trailing stop, place tighter one
                 try:
                     client.cancel_order_by_id(str(existing_trail.id))
-                    print(f"[AEGIS] {ticker} tightening trail: {existing_pct:.1f}% → {target_trail*100:.1f}%")
+                    print(f"[AEGIS] {ticker} tightening trail: {effective_pct:.1f}% → {target_trail*100:.1f}% (gain {pct_gain:.1f}%)")
                 except Exception as _te:
                     # M-2 fix: was silent `continue`. If the same ticker fails
                     # to tighten over and over, we'd never see why.
