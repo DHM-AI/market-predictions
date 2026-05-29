@@ -1240,18 +1240,46 @@ def trail_positions(
 
                     # T1 moves remaining stop to breakeven
                     # T2 leaves stop at breakeven (already there from T1)
-                    if move_to_be and remain_qty > 0 and _entry_px > 0:
+                    # CRITICAL: after a successful partial sell, we MUST place a stop.
+                    # If the ideal stop (breakeven) fails, fall back to any stop below
+                    # current price — naked is never acceptable after a sell.
+                    if remain_qty > 0 and _entry_px > 0:
                         be_side = OrderSide.SELL if is_long else OrderSide.BUY
-                        be_req = StopOrderRequest(
-                            symbol=ticker, qty=remain_qty, side=be_side,
-                            stop_price=round(_entry_px, 2),
-                            time_in_force=TimeInForce.GTC,
-                        )
-                        try:
-                            client.submit_order(be_req)
-                        except Exception:
-                            be_req.time_in_force = TimeInForce.DAY
-                            client.submit_order(be_req)
+                        # Try ideal stop (breakeven if move_to_be, else use current-3%)
+                        _stop_px = round(_entry_px, 2) if move_to_be else round(
+                            (_current_px * 0.97 if is_long else _current_px * 1.03), 2)
+                        _stop_placed = False
+                        for _tif in [TimeInForce.GTC, TimeInForce.DAY]:
+                            try:
+                                client.submit_order(StopOrderRequest(
+                                    symbol=ticker, qty=remain_qty, side=be_side,
+                                    stop_price=_stop_px, time_in_force=_tif))
+                                _stop_placed = True
+                                break
+                            except Exception:
+                                pass
+                        if not _stop_placed:
+                            # Last-resort: place stop 3% below/above current — anything > naked
+                            _fallback_px = round((_current_px * 0.97 if is_long else _current_px * 1.03), 2)
+                            try:
+                                client.submit_order(StopOrderRequest(
+                                    symbol=ticker, qty=remain_qty, side=be_side,
+                                    stop_price=_fallback_px, time_in_force=TimeInForce.DAY))
+                                _stop_placed = True
+                                print(f"[AEGIS] {ticker} {tier_name}: breakeven stop failed — placed fallback stop @ ${_fallback_px:.2f}")
+                            except Exception as _se:
+                                print(f"[AEGIS] {ticker} {tier_name}: ALL stop placements failed: {_se}")
+                        if not _stop_placed:
+                            # Genuinely naked after partial sell — fire Slack alert
+                            try:
+                                from alerts.slack import _post
+                                _post({"text": (
+                                    f"🚨 *NAKED after partial exit — {ticker}*\n"
+                                    f">Sold {close_qty} shares but FAILED to place replacement stop\n"
+                                    f">Remaining: {remain_qty} shares · *Manual stop required NOW*"
+                                )})
+                            except Exception:
+                                pass
 
                     # CRITICAL audit C-7: reissue bracket TP sized to remain_qty.
                     # Was leaving orphan TP at original qty → would over-sell on
