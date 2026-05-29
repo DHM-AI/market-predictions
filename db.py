@@ -6,7 +6,7 @@ Two tables:
   sentiment_cache — one row per (ticker, date) sentiment score
 """
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from supabase import create_client, Client
 
@@ -249,7 +249,7 @@ def get_partial_exit_history(lookback_days: int = 90,
     """
     history: dict = {}
     try:
-        cutoff = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
         result = (
             _client().table("trades")
             .select("ticker, status, dollar_amount, reason, timestamp")

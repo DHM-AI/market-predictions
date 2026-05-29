@@ -37,11 +37,11 @@ try:
     from alpaca.trading.requests import GetOrdersRequest as _GOR
     from alpaca.trading.enums import QueryOrderStatus as _QOS
     import db as _db
-    from datetime import datetime as _dt, timedelta as _td
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
     if _aok() and _db.db_available():
         _c = _get_client()
-        _cutoff = (_dt.utcnow() - _td(minutes=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _cutoff = (_dt.now(_tz.utc) - _td(minutes=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
         _recent_fills = _c.get_orders(_GOR(status=_QOS.ALL, after=_cutoff, limit=200))
         _open_tickers = {p["ticker"] for p in (get_positions() or [])}
 
@@ -71,7 +71,7 @@ try:
                     "mode":     "LIVE" if _aok() else "PAPER",
                     "status":   _status,
                     "reason":   f"Bracket {_status.replace('_hit', '').upper()} fill detected by AEGIS sweep",
-                    "timestamp": _dt.utcnow().isoformat(),
+                    "timestamp": _dt.now(_tz.utc).isoformat(),
                 })
                 print(f"[AEGIS] Logged {_status} for {sym}")
             except Exception as _bf:

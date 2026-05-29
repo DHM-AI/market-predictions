@@ -15,7 +15,7 @@ Exit code 0 = all good, 1 = at least one FAIL.
 """
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ── Colors for terminal output ────────────────────────────────────────────────
 GREEN  = "\033[92m"
@@ -119,7 +119,7 @@ try:
                     from zoneinfo import ZoneInfo
                     now_et_hour = datetime.now(ZoneInfo("America/New_York")).hour
                 except Exception:
-                    now_et_hour = (datetime.utcnow().hour - 4) % 24   # fallback
+                    now_et_hour = (datetime.now(timezone.utc).hour - 4) % 24   # fallback
                 if now_et_hour >= 13:
                     report.add("Supabase — Today's Predictions", "WARN",
                                f"No predictions written for {today} after 1 PM ET — scans may be failing")
@@ -400,7 +400,8 @@ try:
     import urllib.request as _req2
     from datetime import datetime as _dt2
 
-    _now_et_hour = int(_dt2.utcnow().strftime("%H")) - 4  # rough ET (EDT)
+    from datetime import timezone as _tz2
+    _now_et_hour = int(_dt2.now(_tz2.utc).strftime("%H")) - 4  # rough ET (EDT)
     _market_open = 9 <= _now_et_hour < 16   # only attempt during market hours
 
     if db.db_available() and _market_open:
