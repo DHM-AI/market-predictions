@@ -170,9 +170,15 @@ def check_trade(
             # counter was always 0 and MAX_DAILY_TRADES never enforced.
             _ACTIVE_OR_FILLED = {"filled", "partially_filled", "new",
                                  "accepted", "pending_new", "held"}
+            # Count both longs (buy) AND shorts (sell entries) — audit C-3 fix.
+            # Excluding shorts meant the limit only applied to long trades; short
+            # entries were unlimited. Also exclude bracket TP/SL child orders
+            # (they have parent_order_id set) to avoid double-counting.
             trades_today = sum(1 for o in orders
-                               if "buy" in str(getattr(o, "side", "")).lower()
-                               and order_status(o) in _ACTIVE_OR_FILLED)
+                               if order_status(o) in _ACTIVE_OR_FILLED
+                               and not getattr(o, "parent_order_id", None)
+                               and str(getattr(o, "type", "")).lower()
+                                   not in ("stop", "trailing_stop", "limit"))
     except Exception as e:
         print(f"[THEMIS] Could not fetch daily trade count from Alpaca ({e}) — using in-memory fallback")
         trades_today = _daily_trade_count  # fall back to in-memory counter

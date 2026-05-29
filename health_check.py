@@ -17,6 +17,9 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
+# Anchor to script directory so relative paths (MODEL_PATH, .env) resolve correctly
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # ── Colors for terminal output ────────────────────────────────────────────────
 GREEN  = "\033[92m"
 YELLOW = "\033[93m"

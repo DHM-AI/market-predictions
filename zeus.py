@@ -23,6 +23,11 @@ import os
 import sys
 from datetime import datetime, timedelta
 
+# Anchor to this file's directory so relative paths (MODEL_PATH, etc.) work
+# regardless of where `python zeus.py` is invoked from. Without this, running
+# from ~/Documents/Claude/AI-trading/ sends false FAIL alerts for missing model.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # ── Colors for terminal output ────────────────────────────────────────────────
 GREEN  = "\033[92m"
 YELLOW = "\033[93m"

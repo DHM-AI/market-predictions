@@ -55,12 +55,13 @@ def _determine_duration(technicals: dict, earnings_days: int | None) -> str:
     # DAY trade: very high volume surge + strong directional RSI + no squeeze setup.
     # These are fast-moving names that can deliver a quick 2-3% in a single session.
     # DUSK will close them at 3:50 PM ET if still open.
-    vol_raw   = technicals.get("vol", {}).get("ratio", 1.0)   # current vol / avg vol
-    rsi_val   = technicals.get("rsi", {}).get("value", 50)
-    momentum  = technicals.get("momentum", {}).get("triggered", False)
-    extreme_vol = vol_raw >= 3.0           # 3× average volume — real intraday momentum
-    rsi_strong  = rsi_val >= 62 or rsi_val <= 38   # directional bias without being exhausted
-    if extreme_vol and rsi_strong and not bb:   # BB squeeze = hold longer; no squeeze = take quick
+    vol_raw     = technicals.get("vol", {}).get("ratio", 1.0)   # current vol / avg vol
+    rsi_val     = technicals.get("rsi", {}).get("value", 50)
+    extreme_vol = vol_raw >= 3.0                      # 3× average volume — real intraday momentum
+    rsi_strong  = 62 <= rsi_val <= 71 or 29 <= rsi_val <= 38  # directional but NOT extreme
+    # DAY trade: strong vol + directional RSI + no BB squeeze + RSI not extreme
+    # Exclude extreme RSI (≥72 or ≤28) — those are momentum runners that need the 2-3w bracket
+    if extreme_vol and rsi_strong and not bb and not rsi_extreme:
         return "1d (day trade)"
 
     if bb and atr:

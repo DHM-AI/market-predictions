@@ -13,6 +13,11 @@ on:
         type: choice
         options: [close_intraday, eod_report, both]
 
+# Share AEGIS concurrency group with trail_stops.yml — prevents concurrent partial-exit runs
+concurrency:
+  group: aegis
+  cancel-in-progress: false
+
 jobs:
   eod:
     runs-on: ubuntu-latest

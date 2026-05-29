@@ -179,6 +179,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
         direction = row.get("direction", "bullish")
         dollar    = row.get("dollar_amount", 0)
         duration  = row.get("duration", "")
+        _cd_msg   = None   # reset each iteration — prevents leak from prior ticker (C-1 audit fix)
         if dollar <= 0:
             _record_block(ticker, "Kelly sizing returned $0 — no position size allocated")
             continue

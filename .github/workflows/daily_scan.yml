@@ -17,7 +17,7 @@ on:
     - cron: '0 19 * * 1-5'    #  3:00 PM ET — pre-power hour
     - cron: '30 19 * * 1-5'   #  3:30 PM ET — power hour
     - cron: '0 20 * * 1-5'    #  4:00 PM ET — after-hours check
-    - cron: '0 2 * * 2-6'     # Mon–Fri 10 PM ET — ORACLE daily intelligence cycle (2 AM UTC next day)
+    # Note: ORACLE (10 PM ET) is now owned exclusively by oracle.yml — removed from here to prevent double-run
     # ── 30-min fallback triggers (catch GitHub cron delays) ────────────
     # GitHub's cron scheduler can lag 30-120 min. These run 30 min after
     # primary triggers. The scan itself deduplicates: if a scan ran within

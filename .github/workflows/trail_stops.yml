@@ -14,6 +14,11 @@ on:
     - cron: '0 22 * * 0'    # Sunday    6 PM ET — final sweep before Monday open
   workflow_dispatch:   # allow manual trigger from GitHub Actions UI
 
+# Prevent concurrent AEGIS runs — two simultaneous AEGIS cycles can double-fire partial exits
+concurrency:
+  group: aegis
+  cancel-in-progress: false   # finish the running one; don't kill it
+
 jobs:
   trail:
     runs-on: ubuntu-latest

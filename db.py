@@ -296,8 +296,12 @@ def get_partial_exit_history(lookback_days: int = 90,
                     history[tk]["t1_qty"] = float(m.group(1))
             elif st == "partial_exit_t2":
                 history[tk]["t2"] = True
-    except Exception:
-        pass
+    except Exception as _e:
+        # CRITICAL: silent pass here caused AEGIS to double-fire partial exits when
+        # Supabase was unavailable (history returned {} → T1 always looked unfired).
+        # Now we log AND return None as a sentinel so callers can detect the failure.
+        print(f"[DB] get_partial_exit_history FAILED: {_e} — returning None (AEGIS will skip partial exits)")
+        return None   # caller must check: `if partial_history is None: skip partial exit`
     return history
 
 

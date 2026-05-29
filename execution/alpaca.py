@@ -291,8 +291,9 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
         limit_price = round(price * (1 - _tp_pct), 2)
 
     print(f"[APEX] [{mode}] BRACKET {side.upper()} {qty} {ticker} @ ~${price:.2f}")
-    print(f"         Stop loss: ${stop_price:.2f} ({KELLY_LOSS_PCT*100:.0f}% risk)")
-    print(f"         Take profit: ${limit_price:.2f} ({MOVE_TARGET_PCT*100:.0f}% target)")
+    _trade_type = "DAY" if _is_day_trade else "SWING"
+    print(f"         Stop loss: ${stop_price:.2f} ({_sl_pct*100:.1f}% risk) [{_trade_type}]")
+    print(f"         Take profit: ${limit_price:.2f} ({_tp_pct*100:.1f}% target) [{_trade_type}]")
 
     try:
         from alpaca.trading.client import TradingClient
@@ -347,12 +348,13 @@ def place_order(ticker: str, dollar_amount: float, direction: str,
                 m = re.search(r'"base_price"\s*:\s*"?([\d.]+)"?', err_str)
                 if m:
                     actual_price = float(m.group(1))
+                    # Use _sl_pct/_tp_pct (DAY-aware) not hardcoded KELLY/MOVE constants
                     if side == "buy":
-                        stop_price  = round(actual_price * (1 - KELLY_LOSS_PCT), 2)
-                        limit_price = round(actual_price * (1 + MOVE_TARGET_PCT), 2)
+                        stop_price  = round(actual_price * (1 - _sl_pct), 2)
+                        limit_price = round(actual_price * (1 + _tp_pct), 2)
                     else:
-                        stop_price  = round(actual_price * (1 + KELLY_LOSS_PCT), 2)
-                        limit_price = round(actual_price * (1 - MOVE_TARGET_PCT), 2)
+                        stop_price  = round(actual_price * (1 + _sl_pct), 2)
+                        limit_price = round(actual_price * (1 - _tp_pct), 2)
                     qty = max(1, round(dollar_amount / actual_price))
                     print(f"[APEX] Retrying bracket with corrected price ${actual_price:.2f} "
                           f"→ SL ${stop_price:.2f} / TP ${limit_price:.2f}")

@@ -64,8 +64,6 @@ def trail_positions(
     if not is_configured():
         return []
 
-    if not is_configured():
-        pass  # is_configured() check already at line 821 — defensive
     results = []
     try:
         from alpaca.trading.requests import (GetOrdersRequest,
@@ -85,11 +83,19 @@ def trail_positions(
         # position in the same ticker makes the new position skip its scale-out.
         _open_tickers = {p["ticker"] for p in positions}
         partial_history: dict = {}
+        _partial_exit_db_ok = True   # track if DB is available for partial exits
         if ENABLE_PARTIAL_EXIT:
             try:
                 from db import get_partial_exit_history
-                partial_history = get_partial_exit_history(open_tickers=_open_tickers)
+                _ph = get_partial_exit_history(open_tickers=_open_tickers)
+                if _ph is None:
+                    # DB error — disable partial exits this cycle to prevent double-firing
+                    _partial_exit_db_ok = False
+                    print("[AEGIS] Partial exit history unavailable — skipping T1/T2 this cycle")
+                else:
+                    partial_history = _ph
             except Exception as _dbe:
+                _partial_exit_db_ok = False
                 print(f"[AEGIS] Could not load partial exit history: {_dbe}")
 
         # Build map: ticker → active order list
@@ -283,7 +289,7 @@ def trail_positions(
             # Tier 1 at +7%:  close 33% of ORIGINAL, move stop to breakeven
             # Tier 2 at +12%: close another 33% (= same qty as T1, so 66% closed)
             # Remaining 34%:  rides with multi-level trailing stop
-            if ENABLE_PARTIAL_EXIT:
+            if ENABLE_PARTIAL_EXIT and _partial_exit_db_ok:
                 _hist = partial_history.get(ticker, {"t1": False, "t2": False, "t1_qty": 0.0})
                 _abs_qty   = abs(float(qty))
                 _entry_px  = float(p.get("avg_entry_price", 0))

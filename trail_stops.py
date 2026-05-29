@@ -18,7 +18,13 @@ Two things happen in every run:
 Toggle ENABLE_PARTIAL_EXIT = False in config.py to revert to
 single-exit mode instantly.
 """
+import os
 import sys
+
+# Anchor to this file's directory — prevents false errors when invoked from
+# a parent directory (e.g. cd AI-trading && python market-predictions/trail_stops.py)
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 from execution.alpaca import trail_positions, is_configured
 
 if not is_configured():
