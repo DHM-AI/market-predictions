@@ -393,6 +393,50 @@ except Exception as e:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 9. SELF-HEALING — trigger scan if none ran today (market hours only)
+# Runs silently whether health check is triggered at 5 PM or mid-day.
+# ══════════════════════════════════════════════════════════════════════════════
+try:
+    import urllib.request as _req2
+    from datetime import datetime as _dt2
+
+    _now_et_hour = int(_dt2.utcnow().strftime("%H")) - 4  # rough ET (EDT)
+    _market_open = 9 <= _now_et_hour < 16   # only attempt during market hours
+
+    if db.db_available() and _market_open:
+        _today = datetime.today().strftime("%Y-%m-%d")
+        _existing = db.load_predictions_for_date(_today)
+        if not _existing:
+            # No scan today — auto-trigger via GitHub API
+            _gh_token = os.getenv("GITHUB_TOKEN", "")
+            if _gh_token:
+                import urllib.request as _ureq
+                import json as _json
+                _api_url = "https://api.github.com/repos/DHM-AI/navigator/actions/workflows/daily_scan.yml/dispatches"
+                _payload = _json.dumps({"ref": "main"}).encode()
+                _gh_req = _ureq.Request(_api_url, data=_payload, headers={
+                    "Authorization": f"token {_gh_token}",
+                    "Accept": "application/vnd.github.v3+json",
+                    "Content-Type": "application/json",
+                })
+                try:
+                    with _ureq.urlopen(_gh_req, timeout=10) as _r:
+                        report.add("Self-Heal (ARGUS)", "WARN",
+                                   f"No scan today — auto-dispatched via GitHub API (HTTP {_r.status})")
+                except Exception as _ge:
+                    report.add("Self-Heal (ARGUS)", "FAIL",
+                               f"No scan today AND dispatch failed: {str(_ge)[:80]}")
+            else:
+                report.add("Self-Heal (ARGUS)", "WARN",
+                           "No scan today — GITHUB_TOKEN not set, cannot auto-trigger")
+        else:
+            report.add("Self-Heal (ARGUS)", "PASS",
+                       f"Scan confirmed — {len(_existing)} predictions for {_today}")
+except Exception as e:
+    report.add("Self-Heal (ARGUS)", "WARN", f"Self-heal check skipped: {str(e)[:60]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
 overall = report.overall()

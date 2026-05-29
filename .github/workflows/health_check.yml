@@ -38,6 +38,7 @@ jobs:
           ALPACA_BASE_URL:    ${{ secrets.ALPACA_BASE_URL }}
           ALPACA_LIVE_MODE:   ${{ secrets.ALPACA_LIVE_MODE }}
           BANKROLL:           ${{ secrets.BANKROLL }}
+          GITHUB_TOKEN:       ${{ secrets.ILLUMINATI_PAT }}
 
       # GitHub marks the run RED if health_check.py exits with code 1 (any FAIL)
       # So you can see at a glance in the Actions tab whether the system is healthy
