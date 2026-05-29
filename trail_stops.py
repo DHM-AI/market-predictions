@@ -4,9 +4,9 @@ Runs every 30 minutes during market hours via GitHub Actions.
 
 Two things happen in every run:
 
-1. PARTIAL EXIT (scale-out) — fires ONCE per position at +7% gain:
-   - Closes 50% of the position at market
-   - Moves remaining stop to breakeven (entry price)
+1. PARTIAL EXIT (scale-out) — two tiers per position:
+   - T1 at +7%:  closes 20% at market, moves stop to breakeven
+   - T2 at +12%: closes another 20%, remaining 60% rides the trailing stop
    - Logs to Supabase so it never fires twice
    - Next run applies trailing stop to the remaining half
 

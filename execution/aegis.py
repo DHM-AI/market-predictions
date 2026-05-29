@@ -26,9 +26,9 @@ def trail_positions(
       3. Place an Alpaca native trailing stop (GTC) at trail_pct below peak
 
     Partial exit (two-tier scale-out) — if ENABLE_PARTIAL_EXIT is True:
-      Tier 1 at +7%:  close 33% of original, move stop to breakeven
-      Tier 2 at +12%: close another 33% (same qty as T1, = 33% of original)
-      Remaining 34%:  rides with AEGIS trailing stop
+      Tier 1 at +7%:  close 20% of original, move stop to breakeven
+      Tier 2 at +12%: close another 20% (same qty as T1, = 20% of original)
+      Remaining 60%:  rides with AEGIS trailing stop
       Each tier logged to Supabase so it never fires twice per position.
 
     Already-trailing positions are detected by order type and skipped,
@@ -286,9 +286,9 @@ def trail_positions(
             # ══════════════════════════════════════════════════════════════════
 
             # ── Two-tier partial exit (scale-out) ─────────────────────────────
-            # Tier 1 at +7%:  close 33% of ORIGINAL, move stop to breakeven
-            # Tier 2 at +12%: close another 33% (= same qty as T1, so 66% closed)
-            # Remaining 34%:  rides with multi-level trailing stop
+            # Tier 1 at +7%:  close 20% of ORIGINAL, move stop to breakeven
+            # Tier 2 at +12%: close another 20% (= same qty as T1, so 40% closed)
+            # Remaining 60%:  rides with multi-level trailing stop
             if ENABLE_PARTIAL_EXIT and _partial_exit_db_ok:
                 _hist = partial_history.get(ticker, {"t1": False, "t2": False, "t1_qty": 0.0})
                 _abs_qty   = abs(float(qty))
@@ -301,7 +301,7 @@ def trail_positions(
                     nonlocal _abs_qty
                     import math as _math
 
-                    # qty to close = 33% of ORIGINAL position
+                    # qty to close = 20% of ORIGINAL position
                     if tier_name == "t1":
                         raw_qty = _abs_qty * fraction_to_close
                     else:
@@ -311,7 +311,7 @@ def trail_positions(
                     # ALWAYS floor to whole shares — cleaner orders, no Alpaca
                     # complaints on non-fractionable assets, no weird .05 / .79
                     # share displays in Slack alerts. The dropped fractional part
-                    # rides with the trailing stop alongside the remaining 34%.
+                    # rides with the trailing stop alongside the remaining 60%.
                     close_qty  = int(_math.floor(raw_qty))
                     if close_qty <= 0:
                         return None

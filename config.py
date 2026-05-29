@@ -152,22 +152,23 @@ MIN_STOCK_PRICE        = 5.00   # below this → skip the pick
 
 # ── Partial Exit (Two-Tier Scale-Out) ─────────────────────────────────────────
 # THREE-STAGE EXIT STRATEGY:
-#   Tier 1 at +7%:  close 33% of ORIGINAL position, move stop to breakeven
-#   Tier 2 at +12%: close another 33% of ORIGINAL position (same qty as Tier 1)
-#   Remaining 34%:  rides with multi-level AEGIS trailing stop (catches runners)
+#   Tier 1 at +7%:  close 20% of ORIGINAL position, move stop to breakeven
+#   Tier 2 at +12%: close another 20% of ORIGINAL position (same qty as Tier 1)
+#   Remaining 60%:  rides with multi-level AEGIS trailing stop (catches runners)
 #
-# Designed around observed performance: many winners run from +7% to +12-17%,
-# scaling out in stages locks in profit progressively while keeping upside.
+# 20/20/60 vs old 33/33/34: lets 60% of the position run instead of 34%.
+# More aggressive "let winners ride" — bigger payout on strong moves.
+# The two early trims still lock in profit and move stop to breakeven.
 #
 # Set ENABLE_PARTIAL_EXIT = False to revert to single-exit mode instantly.
 ENABLE_PARTIAL_EXIT          = True
 
 PARTIAL_EXIT_TIER1_TRIGGER   = 0.07   # fire Tier 1 at +7% gain
-PARTIAL_EXIT_TIER1_FRACTION  = 0.33   # close 33% of original position
+PARTIAL_EXIT_TIER1_FRACTION  = 0.20   # close 20% of original position
 PARTIAL_EXIT_MOVE_TO_BE      = True   # move remaining stop to breakeven after T1
 
 PARTIAL_EXIT_TIER2_TRIGGER   = 0.12   # fire Tier 2 at +12% gain
-PARTIAL_EXIT_TIER2_FRACTION  = 0.33   # close another 33% (= same qty as T1)
+PARTIAL_EXIT_TIER2_FRACTION  = 0.20   # close another 20% (= same qty as T1)
 
 # Legacy aliases — keep existing callers working
 PARTIAL_EXIT_TRIGGER_PCT = PARTIAL_EXIT_TIER1_TRIGGER
