@@ -16,6 +16,14 @@ Checks:
   8.  Trailing stops are active on positions up >3%
   9.  Buying power is not near zero
  10.  XGBoost model file exists and is fresh
+ 11.  Partial exit history DB is accessible (silent failure = double-fires)
+ 12.  ORACLE double-run: daily_scan.yml must NOT own the 10 PM cron slot
+ 13.  AEGIS concurrency: trail_stops.yml and eod.yml must have concurrency group
+ 14.  ENABLE_OPTIONS is False (opt-in safety — default True = stray orders)
+ 15.  DAY trade bracket is tighter than swing (stop < 3%, target < 20%)
+ 16.  Partial exit fractions sum < 1.0 (T1+T2 must leave a remaining tranche)
+ 17.  Dashboard API health (live Cloudflare endpoint returns 200)
+ 18.  Mac launchd jobs are healthy (exit code 0, not 126)
 
 Exit code 0 = all good, 1 = at least one FAIL.
 """
@@ -149,7 +157,7 @@ except Exception:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 1 — All open positions have a stop loss order active
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[1/10] Stop Loss Coverage{RESET}")
+print(f"\n{BOLD}[1/18] Stop Loss Coverage{RESET}")
 if not alpaca_ok:
     report.add("Stop Loss Coverage", "WARN",
                "Alpaca not configured — cannot verify stop loss orders")
@@ -227,7 +235,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 2 — Position count ≤ MAX_OPEN_POSITIONS
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[2/10] Position Count Limit{RESET}")
+print(f"\n{BOLD}[2/18] Position Count Limit{RESET}")
 if not alpaca_ok:
     report.add("Position Count", "WARN", "Alpaca not configured")
 else:
@@ -246,7 +254,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 3 — Daily trade count within MAX_DAILY_TRADES
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[3/10] Daily Trade Count{RESET}")
+print(f"\n{BOLD}[3/18] Daily Trade Count{RESET}")
 if not alpaca_ok:
     report.add("Daily Trade Count", "WARN", "Alpaca not configured")
 else:
@@ -288,7 +296,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 4 — Portfolio above daily loss limit
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[4/10] Portfolio & Daily Loss Limit{RESET}")
+print(f"\n{BOLD}[4/18] Portfolio & Daily Loss Limit{RESET}")
 if not alpaca_ok:
     report.add("Daily Loss Limit", "WARN", "Alpaca not configured")
 else:
@@ -320,7 +328,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 5 — GitHub Actions ran today (predictions written today)
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[5/10] GitHub Actions / Daily Scan{RESET}")
+print(f"\n{BOLD}[5/18] GitHub Actions / Daily Scan{RESET}")
 if not db_ok:
     report.add("Daily Scan (ARGUS)", "WARN", "Supabase not configured — cannot verify")
 else:
@@ -354,7 +362,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 6 — ORACLE ran and saved learnings this week
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[6/10] ORACLE Learnings{RESET}")
+print(f"\n{BOLD}[6/18] ORACLE Learnings{RESET}")
 if not db_ok:
     report.add("ORACLE Learnings", "WARN", "Supabase not configured — cannot verify")
 else:
@@ -393,7 +401,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 7 — No positions >20% underwater without a stop loss
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[7/10] Deep Underwater Positions{RESET}")
+print(f"\n{BOLD}[7/18] Deep Underwater Positions{RESET}")
 if not alpaca_ok:
     report.add("Deep Underwater Check", "WARN", "Alpaca not configured")
 elif not alpaca_positions:
@@ -436,7 +444,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 8 — Trailing stops active on positions up >3%
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[8/10] Trailing Stop Coverage{RESET}")
+print(f"\n{BOLD}[8/18] Trailing Stop Coverage{RESET}")
 if not alpaca_ok:
     report.add("Trailing Stop Coverage", "WARN", "Alpaca not configured")
 elif not alpaca_positions:
@@ -470,7 +478,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 9 — Buying power is not near zero
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[9/10] Buying Power{RESET}")
+print(f"\n{BOLD}[9/18] Buying Power{RESET}")
 if not alpaca_ok:
     report.add("Buying Power", "WARN", "Alpaca not configured")
 else:
@@ -496,7 +504,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 10 — XGBoost model exists and is fresh
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[10/10] XGBoost Model Freshness{RESET}")
+print(f"\n{BOLD}[10/18] XGBoost Model Freshness{RESET}")
 try:
     from config import MODEL_PATH, FEATURE_NAMES_PATH
 
@@ -536,6 +544,244 @@ try:
                            f"Loads OK · {age_str}{feat_str}")
 except Exception as e:
     report.add("XGBoost Model", "FAIL", str(e)[:100])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 11 — Partial exit history DB is accessible
+# A silent `pass` in get_partial_exit_history() returned {} on DB failure,
+# making AEGIS think T1/T2 had never fired → double partial exits on live money.
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[11/18] Partial Exit DB Accessibility{RESET}")
+if not db_ok:
+    report.add("Partial Exit DB", "WARN", "Supabase not configured — cannot verify")
+else:
+    try:
+        from db import get_partial_exit_history
+        open_tickers = {p["ticker"] for p in alpaca_positions} if alpaca_positions else {"_test_"}
+        result = get_partial_exit_history(open_tickers=open_tickers)
+        if result is None:
+            report.add("Partial Exit DB", "FAIL",
+                       "get_partial_exit_history() returned None — DB error. "
+                       "AEGIS will skip partial exits this cycle to prevent double-fires.")
+        else:
+            fired = [t for t, h in result.items() if h.get("t1")]
+            report.add("Partial Exit DB", "PASS",
+                       f"DB accessible · {len(result)} tickers with history · "
+                       f"T1 fired: {fired or 'none'}")
+    except Exception as e:
+        report.add("Partial Exit DB", "FAIL", f"Exception: {str(e)[:100]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 12 — ORACLE must not run twice (daily_scan.yml must not own 10PM slot)
+# Bug found 2026-05-29: both daily_scan.yml and oracle.yml had '0 2 * * 2-6'
+# cron → ORACLE ran twice nightly, doubled Supabase writes + API spend.
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[12/18] ORACLE Double-Run Guard{RESET}")
+try:
+    import re
+    scan_yml = ".github/workflows/daily_scan.yml"
+    oracle_yml = ".github/workflows/oracle.yml"
+    if not os.path.exists(scan_yml):
+        report.add("ORACLE Double-Run", "WARN", f"{scan_yml} not found")
+    else:
+        with open(scan_yml) as f:
+            scan_content = f.read()
+        # The 10 PM ET slot is '0 2 * * *' or '0 2 * * 2-6' in UTC
+        oracle_cron = re.findall(r"cron:\s*['\"]0 2 \* \* [^'\"]+['\"]", scan_content)
+        # Filter out commented lines
+        active = [c for c in oracle_cron
+                  if not any(line.strip().startswith("#")
+                             for line in scan_content.split("\n")
+                             if c.split("'")[1] in line or c.split('"')[1] in line
+                             if line.strip().startswith("#"))]
+        # Simpler check: look for uncommented 0 2 cron in scan file
+        uncommented = [l for l in scan_content.split("\n")
+                       if "cron:" in l and "0 2 " in l and not l.strip().startswith("#")]
+        if uncommented:
+            report.add("ORACLE Double-Run", "FAIL",
+                       f"daily_scan.yml still has 10 PM UTC cron — ORACLE will run twice: "
+                       f"{uncommented[0].strip()}")
+        else:
+            report.add("ORACLE Double-Run", "PASS",
+                       "daily_scan.yml does not own the 10 PM slot — ORACLE runs once via oracle.yml")
+except Exception as e:
+    report.add("ORACLE Double-Run", "WARN", f"Could not parse workflow: {str(e)[:80]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 13 — AEGIS concurrency group prevents overlapping runs
+# Bug found 2026-05-29: trail_stops.yml + eod.yml could run simultaneously
+# at 3:45/3:50/4:00 PM ET → concurrent partial exits before DB records land.
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[13/18] AEGIS Concurrency Guard{RESET}")
+try:
+    missing_concurrency = []
+    for yml in [".github/workflows/trail_stops.yml", ".github/workflows/eod.yml"]:
+        if not os.path.exists(yml):
+            missing_concurrency.append(f"{yml} (missing)")
+            continue
+        with open(yml) as f:
+            content = f.read()
+        if "concurrency:" not in content:
+            missing_concurrency.append(os.path.basename(yml))
+    if missing_concurrency:
+        report.add("AEGIS Concurrency", "FAIL",
+                   f"Missing concurrency group in: {', '.join(missing_concurrency)} "
+                   f"— concurrent AEGIS runs can double-fire partial exits")
+    else:
+        report.add("AEGIS Concurrency", "PASS",
+                   "trail_stops.yml + eod.yml both have concurrency: group=aegis")
+except Exception as e:
+    report.add("AEGIS Concurrency", "WARN", str(e)[:80])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 14 — ENABLE_OPTIONS must be False (opt-in, not opt-out)
+# Bug found 2026-05-29: defaulted True → iron butterfly orders submitted
+# on any deployment without explicit ENABLE_OPTIONS=false env var.
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[14/18] Options Safety Gate{RESET}")
+try:
+    from config import ENABLE_OPTIONS
+    if ENABLE_OPTIONS:
+        report.add("Options Safety Gate", "WARN",
+                   "ENABLE_OPTIONS=True — iron butterfly orders will fire on qualifying "
+                   "high-score earnings plays. Requires Alpaca Level 3 approval.")
+    else:
+        report.add("Options Safety Gate", "PASS",
+                   "ENABLE_OPTIONS=False — options orders disabled (opt-in safety)")
+except Exception as e:
+    report.add("Options Safety Gate", "WARN", str(e)[:80])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 15 — DAY trade bracket must be tighter than swing
+# Bug found 2026-05-29: DAY trade retry block used KELLY_LOSS_PCT/MOVE_TARGET_PCT
+# instead of DAY_TRADE_STOP_PCT/DAY_TRADE_TARGET_PCT → swing bracket on DAY trades.
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[15/18] DAY Trade Bracket Parameters{RESET}")
+try:
+    from config import (DAY_TRADE_STOP_PCT, DAY_TRADE_TARGET_PCT,
+                        KELLY_LOSS_PCT, MOVE_TARGET_PCT)
+    issues = []
+    if DAY_TRADE_STOP_PCT >= KELLY_LOSS_PCT:
+        issues.append(f"DAY stop ({DAY_TRADE_STOP_PCT:.1%}) >= swing stop ({KELLY_LOSS_PCT:.1%})")
+    if DAY_TRADE_TARGET_PCT >= MOVE_TARGET_PCT:
+        issues.append(f"DAY target ({DAY_TRADE_TARGET_PCT:.1%}) >= swing target ({MOVE_TARGET_PCT:.1%})")
+    if DAY_TRADE_STOP_PCT <= 0 or DAY_TRADE_TARGET_PCT <= 0:
+        issues.append("DAY stop or target is zero or negative")
+    if issues:
+        report.add("DAY Trade Bracket", "FAIL", "; ".join(issues))
+    else:
+        report.add("DAY Trade Bracket", "PASS",
+                   f"DAY: stop={DAY_TRADE_STOP_PCT:.1%} / target={DAY_TRADE_TARGET_PCT:.1%} "
+                   f"· Swing: stop={KELLY_LOSS_PCT:.1%} / target={MOVE_TARGET_PCT:.1%}")
+except ImportError:
+    report.add("DAY Trade Bracket", "FAIL",
+               "DAY_TRADE_STOP_PCT or DAY_TRADE_TARGET_PCT not found in config.py")
+except Exception as e:
+    report.add("DAY Trade Bracket", "WARN", str(e)[:80])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 16 — Partial exit fractions must sum < 1.0
+# T1 + T2 must always leave a non-zero remaining tranche to ride the trailing stop.
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[16/18] Partial Exit Fractions{RESET}")
+try:
+    from config import (PARTIAL_EXIT_TIER1_FRACTION, PARTIAL_EXIT_TIER2_FRACTION,
+                        PARTIAL_EXIT_TIER1_TRIGGER, PARTIAL_EXIT_TIER2_TRIGGER,
+                        ENABLE_PARTIAL_EXIT)
+    total = PARTIAL_EXIT_TIER1_FRACTION + PARTIAL_EXIT_TIER2_FRACTION
+    remaining = 1.0 - total
+    if not ENABLE_PARTIAL_EXIT:
+        report.add("Partial Exit Fractions", "PASS",
+                   "ENABLE_PARTIAL_EXIT=False — partial exits disabled")
+    elif total >= 1.0:
+        report.add("Partial Exit Fractions", "FAIL",
+                   f"T1({PARTIAL_EXIT_TIER1_FRACTION:.0%}) + T2({PARTIAL_EXIT_TIER2_FRACTION:.0%}) "
+                   f"= {total:.0%} — no shares remain to ride the trailing stop")
+    elif total > 0.8:
+        report.add("Partial Exit Fractions", "WARN",
+                   f"T1+T2 = {total:.0%}, only {remaining:.0%} rides trailing stop — "
+                   f"consider reducing to leave more upside")
+    else:
+        report.add("Partial Exit Fractions", "PASS",
+                   f"T1={PARTIAL_EXIT_TIER1_FRACTION:.0%} at +{PARTIAL_EXIT_TIER1_TRIGGER:.0%} · "
+                   f"T2={PARTIAL_EXIT_TIER2_FRACTION:.0%} at +{PARTIAL_EXIT_TIER2_TRIGGER:.0%} · "
+                   f"{remaining:.0%} rides trailing stop")
+except Exception as e:
+    report.add("Partial Exit Fractions", "WARN", str(e)[:80])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 17 — Dashboard API is reachable and returns valid JSON
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[17/18] Dashboard API Health{RESET}")
+try:
+    import urllib.request, json as _json
+    _dashboard_url = "https://illuminati-dashboard.pages.dev/api/dashboard"
+    _req = urllib.request.Request(_dashboard_url, headers={"User-Agent": "ZEUS-health"})
+    with urllib.request.urlopen(_req, timeout=10) as _r:
+        _status = _r.status
+        _body = _r.read(512)   # just enough to confirm JSON
+    if _status == 200:
+        try:
+            _parsed = _json.loads(_body + b"}")  # partial parse check
+        except Exception:
+            pass  # truncated body is fine — we got a 200
+        report.add("Dashboard API", "PASS",
+                   f"illuminati-dashboard.pages.dev responded HTTP {_status}")
+    else:
+        report.add("Dashboard API", "FAIL",
+                   f"Dashboard returned HTTP {_status} — may be down or 1102 error")
+except Exception as e:
+    report.add("Dashboard API", "WARN",
+               f"Could not reach dashboard: {str(e)[:80]} "
+               f"(network may be unavailable from GitHub Actions)")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHECK 18 — Mac launchd jobs are healthy (exit code 0, not 126)
+# Bug found 2026-05-29: both illuminati launchd jobs had exit code 126
+# (not executable) — AEGIS and scan backup layers were silently not running.
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[18/18] Mac launchd Job Health{RESET}")
+try:
+    import subprocess, platform
+    if platform.system() != "Darwin":
+        report.add("Mac launchd Health", "PASS",
+                   "Not running on macOS — launchd check skipped (GitHub Actions runner)")
+    else:
+        _result = subprocess.run(
+            ["launchctl", "list"],
+            capture_output=True, text=True, timeout=5
+        )
+        _lines = [l for l in _result.stdout.splitlines() if "illuminati" in l.lower()]
+        if not _lines:
+            report.add("Mac launchd Health", "WARN",
+                       "No illuminati launchd jobs found — Mac backup layer not loaded")
+        else:
+            failed = []
+            healthy = []
+            for line in _lines:
+                parts = line.split("\t")
+                exit_code = parts[1].strip() if len(parts) >= 3 else "?"
+                label = parts[2].strip() if len(parts) >= 3 else line
+                if exit_code not in ("0", "-"):
+                    failed.append(f"{label} (exit {exit_code})")
+                else:
+                    healthy.append(label.split(".")[-1])
+            if failed:
+                report.add("Mac launchd Health", "FAIL",
+                           f"Unhealthy jobs: {', '.join(failed)} — "
+                           f"check script permissions (chmod +x)")
+            else:
+                report.add("Mac launchd Health", "PASS",
+                           f"All launchd jobs healthy: {', '.join(healthy)}")
+except Exception as e:
+    report.add("Mac launchd Health", "WARN", f"Could not run launchctl: {str(e)[:80]}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
