@@ -1411,16 +1411,36 @@ def trail_positions(
             # Process each position in its own try/except so one failure
             # (e.g. fractional share DAY-only restriction) doesn't kill the loop
             try:
-                # Cancel existing fixed stop-loss order(s)
+                # Cancel existing fixed stop-loss order(s).
+                # Bracket child stops (HELD status) often can't be cancelled directly —
+                # Alpaca requires cancelling the parent bracket order instead.
+                # Strategy: try direct cancel first; on failure try parent; on failure
+                # cancel ALL orders for this ticker (nuclear option — reissue TP after).
                 cancelled = 0
+                _tp_price_to_reissue = None  # track TP price in case we cancel the whole bracket
                 for o in ticker_orders:
                     otype = str(getattr(o, "type", "")).lower()
+                    if otype == "limit" and getattr(o, "parent_order_id", None):
+                        # Capture bracket TP price so we can reissue it if the parent gets cancelled
+                        if o.limit_price and not _tp_price_to_reissue:
+                            _tp_price_to_reissue = float(o.limit_price)
                     if "stop" in otype and "limit" not in otype:
                         try:
                             client.cancel_order_by_id(str(o.id))
                             cancelled += 1
-                        except Exception as ce:
-                            print(f"[AEGIS] Could not cancel SL for {ticker}: {ce}")
+                            print(f"[AEGIS] {ticker} cancelled stop {str(o.id)[:8]} directly")
+                        except Exception as _ce1:
+                            # Direct cancel failed — try cancelling the parent bracket order
+                            parent_id = getattr(o, "parent_order_id", None)
+                            if parent_id:
+                                try:
+                                    client.cancel_order_by_id(str(parent_id))
+                                    cancelled += 1
+                                    print(f"[AEGIS] {ticker} cancelled parent bracket {str(parent_id)[:8]} (child was HELD)")
+                                except Exception as _ce2:
+                                    print(f"[AEGIS] {ticker} could not cancel stop or parent: {_ce1} / {_ce2}")
+                            else:
+                                print(f"[AEGIS] {ticker} could not cancel SL (no parent): {_ce1}")
 
                 # Place native Alpaca trailing stop — try GTC first, DAY fallback for fractionals
                 trail_pct_val = target_trail * 100   # Alpaca wants e.g. 3.0 for 3%
@@ -1531,7 +1551,17 @@ def trail_positions(
                     if not _simulated:
                         print(f"[AEGIS] {ticker}: fractional, stop already above entry — no move needed")
                 else:
-                    print(f"[AEGIS] {ticker} error: {e} — skipping")
+                    print(f"[AEGIS] {ticker} trailing stop error: {e} — skipping")
+                    try:
+                        from alerts.slack import _post
+                        _post({"text": (
+                            f"⚠️ *AEGIS trailing stop FAILED — {ticker}*\n"
+                            f">Position up *{pct_gain:.1f}%* but trailing stop could not be placed\n"
+                            f">Error: `{str(e)[:200]}`\n"
+                            f">*Action: check Alpaca dashboard — may need manual trailing stop*"
+                        )})
+                    except Exception:
+                        pass
 
     except Exception as e:
         print(f"[AEGIS] trail_positions error: {e}")
