@@ -180,9 +180,10 @@ else:
 
     if unprotected:
         # Auto-fix: place stops for any unprotected position
+        import time as _zeus_time
         from alpaca.trading.client import TradingClient
-        from alpaca.trading.requests import StopOrderRequest
-        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import StopOrderRequest, GetOrdersRequest as _GORZEQ
+        from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus as _ZQOS
         from config import KELLY_LOSS_PCT, ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_LIVE_MODE
         _fix_client = TradingClient(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=not ALPACA_LIVE_MODE)
         fixed, failed = [], []
@@ -194,16 +195,56 @@ else:
             is_long = "long" in str(p.get("side","")).lower()
             stop    = round(entry * (1 - KELLY_LOSS_PCT if is_long else 1 + KELLY_LOSS_PCT), 2)
             side    = OrderSide.SELL if is_long else OrderSide.BUY
+            _ticker = p["ticker"]
+            _placed = False
             for tif in [TimeInForce.GTC, TimeInForce.DAY]:
                 try:
                     _fix_client.submit_order(StopOrderRequest(
-                        symbol=p["ticker"], qty=qty, side=side,
+                        symbol=_ticker, qty=qty, side=side,
                         time_in_force=tif, stop_price=stop))
-                    fixed.append(p["ticker"])
+                    fixed.append(_ticker)
+                    _placed = True
                     break
-                except Exception:
+                except Exception as _ze:
+                    _zes = str(_ze).lower()
+                    # held_for_orders / 40310000: stale bracket legs are holding
+                    # the shares. Sweep cancel all active orders for this ticker,
+                    # wait 2s for Alpaca to release the hold, then retry once.
+                    if ("insufficient" in _zes or "held_for_orders" in _zes
+                            or "40310000" in str(_ze)):
+                        print(f"[ZEUS] {_ticker} stop hit held_for_orders "
+                              f"— cancelling stale orders and retrying")
+                        try:
+                            _stale = _fix_client.get_orders(_GORZEQ(
+                                status=_ZQOS.ALL, limit=200))
+                            _active_st = {"open","held","accepted","pending_new","new"}
+                            for _so in _stale:
+                                if (getattr(_so,"symbol","") == _ticker
+                                        and str(getattr(_so,"status","")).lower().replace(
+                                            "orderstatus.","") in _active_st):
+                                    try:
+                                        _fix_client.cancel_order_by_id(str(_so.id))
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+                        _zeus_time.sleep(2.0)
+                        # Retry once with GTC, fall back to DAY
+                        for _r_tif in [TimeInForce.GTC, TimeInForce.DAY]:
+                            try:
+                                _fix_client.submit_order(StopOrderRequest(
+                                    symbol=_ticker, qty=qty, side=side,
+                                    time_in_force=_r_tif, stop_price=stop))
+                                fixed.append(_ticker)
+                                _placed = True
+                                break
+                            except Exception:
+                                pass
+                        break  # don't iterate outer tif loop again
                     if tif == TimeInForce.DAY:
-                        failed.append(p["ticker"])
+                        pass  # falls through to failed append below
+            if not _placed and _ticker not in fixed:
+                failed.append(_ticker)
         msg = f"Auto-fixed: {fixed}" if fixed else ""
         if failed:
             report.add("Stop Loss Coverage", "FAIL",
