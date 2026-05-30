@@ -213,15 +213,44 @@ def trail_positions(
                         continue
                     try:
                         from alpaca.trading.requests import StopOrderRequest as _SOR
+                        # If shares are held by a stale TP limit order (from a
+                        # partially-failed bracket cancel in a prior AEGIS run),
+                        # cancel ALL active orders for this ticker first so the
+                        # rescue stop can actually be placed.
                         _rescue_req = _SOR(
                             symbol=ticker, qty=_stop_qty, side=stop_side,
                             stop_price=new_stop, time_in_force=TimeInForce.GTC,
                         )
                         try:
                             _rescue_ord = client.submit_order(_rescue_req)
-                        except Exception:
-                            _rescue_req.time_in_force = TimeInForce.DAY
-                            _rescue_ord = client.submit_order(_rescue_req)
+                        except Exception as _first_err:
+                            _first_err_s = str(_first_err).lower()
+                            if ("insufficient" in _first_err_s or "held_for_orders" in _first_err_s
+                                    or "40310000" in str(_first_err)):
+                                # Stale orders holding the shares — sweep and retry once
+                                print(f"[AEGIS] {ticker} rescue stop hit held_for_orders — cancelling all orders and retrying")
+                                try:
+                                    _all_t = client.get_orders(GetOrdersRequest(status=_QOS.ALL, limit=200))
+                                    for _ot in _all_t:
+                                        if _ot.symbol == ticker and is_active_order(_ot):
+                                            try:
+                                                client.cancel_order_by_id(str(_ot.id))
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    pass
+                                import time as _rescue_time
+                                _rescue_time.sleep(2.0)
+                                # Retry GTC then DAY
+                                try:
+                                    _rescue_ord = client.submit_order(_rescue_req)
+                                except Exception:
+                                    _rescue_req.time_in_force = TimeInForce.DAY
+                                    _rescue_ord = client.submit_order(_rescue_req)
+                            else:
+                                # Not a held_for_orders error — try DAY fallback then give up
+                                _rescue_req.time_in_force = TimeInForce.DAY
+                                _rescue_ord = client.submit_order(_rescue_req)
                         _frac_note = f" (fractional dust {qty - _stop_qty:.4f} uncovered)" if _is_fractional else ""
                         print(f"[AEGIS] {ticker} was NAKED — placed rescue stop @ ${new_stop:.2f}{_frac_note}")
                         results.append({
@@ -624,6 +653,7 @@ def trail_positions(
                 # cancel ALL orders for this ticker (nuclear option — reissue TP after).
                 cancelled = 0
                 _tp_price_to_reissue = None  # track TP price in case we cancel the whole bracket
+                _cancelled_parent    = False  # True when we cancelled a bracket parent order
                 for o in ticker_orders:
                     otype = str(getattr(o, "type", "")).lower()
                     if otype == "limit" and getattr(o, "parent_order_id", None):
@@ -642,32 +672,58 @@ def trail_positions(
                                 try:
                                     client.cancel_order_by_id(str(parent_id))
                                     cancelled += 1
+                                    _cancelled_parent = True
                                     print(f"[AEGIS] {ticker} cancelled parent bracket {str(parent_id)[:8]} (child was HELD)")
                                 except Exception as _ce2:
                                     print(f"[AEGIS] {ticker} could not cancel stop or parent: {_ce1} / {_ce2}")
                             else:
                                 print(f"[AEGIS] {ticker} could not cancel SL (no parent): {_ce1}")
 
-                # Place native Alpaca trailing stop — try GTC first, DAY fallback for fractionals
+                # Race-condition fix: Alpaca's held_for_orders count doesn't update
+                # instantly after a bracket parent cancel. Without a pause, the trailing
+                # stop placement hits "insufficient qty available (available: 0)" even
+                # though the cancel succeeded. Sleep here so the position is actually
+                # free before we try to place a new order on it.
+                if _cancelled_parent:
+                    import time as _time_mod
+                    _time_mod.sleep(1.5)
+                    print(f"[AEGIS] {ticker} waited 1.5s for bracket cancel to propagate")
+
+                # Place native Alpaca trailing stop — try GTC first, DAY fallback for fractionals.
+                # If the first attempt fails with "insufficient qty / held_for_orders" (race
+                # condition where Alpaca hasn't released the shares yet), wait another 2s and retry.
                 trail_pct_val = target_trail * 100   # Alpaca wants e.g. 3.0 for 3%
                 assert 0.5 <= trail_pct_val <= 20, f"trail_percent {trail_pct_val} out of sane range"
                 order = None
-                for tif in [TimeInForce.GTC, TimeInForce.DAY]:
-                    try:
-                        trail_req = TrailingStopOrderRequest(
-                            symbol        = ticker,
-                            qty           = qty,
-                            side          = trail_side,   # SELL for longs, BUY to cover shorts
-                            time_in_force = tif,
-                            trail_percent = trail_pct_val,
-                        )
-                        order = client.submit_order(trail_req)
-                        break  # success
-                    except Exception as oe:
-                        if "fractional" in str(oe).lower() and tif == TimeInForce.GTC:
-                            print(f"[AEGIS] {ticker} is fractional — retrying with DAY order")
-                            continue
-                        raise  # re-raise unexpected errors
+                _trail_attempts = 0
+                while _trail_attempts < 2 and order is None:
+                    _trail_attempts += 1
+                    for tif in [TimeInForce.GTC, TimeInForce.DAY]:
+                        try:
+                            trail_req = TrailingStopOrderRequest(
+                                symbol        = ticker,
+                                qty           = qty,
+                                side          = trail_side,   # SELL for longs, BUY to cover shorts
+                                time_in_force = tif,
+                                trail_percent = trail_pct_val,
+                            )
+                            order = client.submit_order(trail_req)
+                            break  # success
+                        except Exception as oe:
+                            if "fractional" in str(oe).lower() and tif == TimeInForce.GTC:
+                                print(f"[AEGIS] {ticker} is fractional — retrying with DAY order")
+                                continue
+                            # On held_for_orders / insufficient qty, wait and retry once
+                            _err_str = str(oe).lower()
+                            if _trail_attempts == 1 and (
+                                "insufficient" in _err_str or "held_for_orders" in _err_str
+                                or "40310000" in str(oe)
+                            ):
+                                import time as _time_mod2
+                                print(f"[AEGIS] {ticker} trailing stop hit held_for_orders — waiting 2s then retry")
+                                _time_mod2.sleep(2.0)
+                                break   # break inner tif loop, outer while retries
+                            raise  # re-raise unexpected errors
 
                 if order is None:
                     print(f"[AEGIS] {ticker}: could not place trailing stop — skipping")
