@@ -735,7 +735,7 @@ def close_position(ticker: str) -> dict:
                     pass
             # Give Alpaca a moment to release the held shares
             if cancelled:
-                _time.sleep(0.5)
+                _time.sleep(2.0)
         except Exception as _ce:
             # M-2 fix: if the WHOLE cancel-loop fails (Alpaca API down, auth
             # broken), proceed-to-close at line 730 will also fail confusingly.
@@ -748,7 +748,11 @@ def close_position(ticker: str) -> dict:
         except Exception as first_err:
             if "insufficient" in str(first_err).lower() or "held" in str(first_err).lower():
                 _time.sleep(1.5)
-                client.close_position(ticker)
+                try:
+                    result = client.close_position(ticker)
+                except Exception as _e2:
+                    print(f"[ALPACA] close_position retry also failed for {ticker}: {_e2}")
+                    return {"status": "error", "ticker": ticker, "message": f"Both close attempts failed: {_e2}"}
             else:
                 raise
 

@@ -104,6 +104,36 @@ def run() -> list[dict]:
     for p, reason in to_hold:
         print(f"    → Hold {p['ticker']:6s}  ({reason})")
 
+    # Market-hours gate — if the workflow fires after 4 PM, Alpaca rejects
+    # market orders silently and positions get left open overnight.
+    _market_open = True
+    try:
+        from alpaca.trading.client import TradingClient as _DuskTC
+        from config import ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_LIVE_MODE
+        _dusk_client = _DuskTC(ALPACA_API_KEY, ALPACA_SECRET_KEY, paper=not ALPACA_LIVE_MODE)
+        _clock = _dusk_client.get_clock()
+        if not _clock.is_open:
+            print("[DUSK] Market is closed — skipping position close (workflow may have fired outside market hours)")
+            _market_open = False
+        else:
+            _market_open = True
+    except Exception as _ce:
+        print(f"[DUSK] Could not verify market hours: {_ce} — proceeding anyway")
+        _market_open = True
+
+    if not _market_open:
+        try:
+            from alerts.slack import _post
+            _post({"text": (
+                f"⚠️ *DUSK skipped position close — market is closed*\n"
+                f"> Workflow fired outside market hours. "
+                f"{len(to_close)} day-trade position(s) NOT closed.\n"
+                f"> Manual review required."
+            )})
+        except Exception:
+            pass
+        return []
+
     results = []
     for p in to_close:
         ticker = p["ticker"]

@@ -66,7 +66,7 @@ today  = datetime.today().strftime("%Y-%m-%d")
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 1 — Environment variables
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[1/7] Environment Variables{RESET}")
+print(f"\n{BOLD}[1/9] Environment Variables{RESET}")
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
@@ -103,7 +103,7 @@ else:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 2 — Supabase connection + today's predictions
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[2/7] Supabase / Database{RESET}")
+print(f"\n{BOLD}[2/9] Supabase / Database{RESET}")
 db_predictions = []
 try:
     import db
@@ -157,7 +157,7 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 3 — Alpaca connection + account health
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[3/7] Alpaca Trading{RESET}")
+print(f"\n{BOLD}[3/9] Alpaca Trading{RESET}")
 alpaca_acct = {}
 alpaca_positions = []
 try:
@@ -238,7 +238,7 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 4 — XGBoost model
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[4/7] XGBoost Model{RESET}")
+print(f"\n{BOLD}[4/9] XGBoost Model{RESET}")
 try:
     from config import MODEL_PATH, FEATURE_NAMES_PATH
     import os
@@ -275,7 +275,7 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 5 — Data pipeline (universe + OHLCV sample)
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[5/7] Data Pipeline{RESET}")
+print(f"\n{BOLD}[5/9] Data Pipeline{RESET}")
 try:
     from data.universe import get_universe
     tickers = get_universe()
@@ -303,7 +303,7 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 6 — Scoring + Kelly pipeline
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[6/7] Scoring & Kelly Pipeline{RESET}")
+print(f"\n{BOLD}[6/9] Scoring & Kelly Pipeline{RESET}")
 try:
     from signals.scorer import score_ticker
     from signals.kelly  import position_size
@@ -339,7 +339,7 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK 7 — Monthly goal progress
 # ══════════════════════════════════════════════════════════════════════════════
-print(f"\n{BOLD}[7/7] Monthly Goal Progress{RESET}")
+print(f"\n{BOLD}[7/9] Monthly Goal Progress{RESET}")
 try:
     from calendar import monthrange
     from config import BANKROLL, MONTHLY_TARGET_PCT
@@ -372,6 +372,7 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════════════════
 # 8. DASHBOARD AVAILABILITY
 # ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[8/9] Dashboard API Health{RESET}")
 try:
     import urllib.request, urllib.error
     _DASH_URL = "https://illuminati-dashboard.pages.dev/api/dashboard"
@@ -399,12 +400,13 @@ except Exception as e:
 # 9. SELF-HEALING — trigger scan if none ran today (market hours only)
 # Runs silently whether health check is triggered at 5 PM or mid-day.
 # ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{BOLD}[9/9] Self-Heal ARGUS{RESET}")
 try:
     import urllib.request as _req2
     from datetime import datetime as _dt2
 
-    from datetime import timezone as _tz2
-    _now_et_hour = int(_dt2.now(_tz2.utc).strftime("%H")) - 4  # rough ET (EDT)
+    from zoneinfo import ZoneInfo as _ZI_hc
+    _now_et_hour = int(_dt2.now(_ZI_hc("America/New_York")).strftime("%H"))
     _market_open = 9 <= _now_et_hour < 16   # only attempt during market hours
 
     if db.db_available() and _market_open:

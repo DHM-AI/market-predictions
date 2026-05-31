@@ -147,8 +147,9 @@ def check_trade(
         cur_px = get_current_price(ticker)
         if cur_px is not None and cur_px > 0 and cur_px < MIN_STOCK_PRICE:
             return False, f"{ticker} below ${MIN_STOCK_PRICE} floor (current ${cur_px:.2f}) — too illiquid"
-    except Exception as e:
-        print(f"[THEMIS] Min-price check failed for {ticker}: {e} — allowing trade")
+    except Exception as _pe:
+        print(f"[GUARD] Could not verify price for {ticker}: {_pe} — blocking as fail-safe (MIN_STOCK_PRICE={MIN_STOCK_PRICE})")
+        return False, f"Could not verify stock price to enforce ${MIN_STOCK_PRICE} minimum: {_pe}"
 
     # ── Check 2: Max concurrent positions ─────────────────────────────────────
     if len(open_positions) >= MAX_OPEN_POSITIONS:

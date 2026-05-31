@@ -260,7 +260,8 @@ def detect_patterns(df: pd.DataFrame) -> dict:
             result = fn(df)
             if result["triggered"]:
                 triggered.append(result)
-        except Exception:
+        except Exception as _pe:
+            print(f"[PATTERNS] {getattr(fn, '__name__', '?')} detector error ({type(_pe).__name__}): {_pe}")
             continue
 
     if not triggered:

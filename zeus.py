@@ -202,7 +202,7 @@ else:
                     _fix_client.submit_order(StopOrderRequest(
                         symbol=_ticker, qty=qty, side=side,
                         time_in_force=tif, stop_price=stop))
-                    fixed.append(_ticker)
+                    if _ticker not in fixed: fixed.append(_ticker)
                     _placed = True
                     break
                 except Exception as _ze:
@@ -235,7 +235,7 @@ else:
                                 _fix_client.submit_order(StopOrderRequest(
                                     symbol=_ticker, qty=qty, side=side,
                                     time_in_force=_r_tif, stop_price=stop))
-                                fixed.append(_ticker)
+                                if _ticker not in fixed: fixed.append(_ticker)
                                 _placed = True
                                 break
                             except Exception:
@@ -664,11 +664,11 @@ try:
             continue
         with open(yml) as f:
             content = f.read()
-        if "concurrency:" not in content:
+        if "concurrency:" not in content or "group: aegis" not in content:
             missing_concurrency.append(os.path.basename(yml))
     if missing_concurrency:
         report.add("AEGIS Concurrency", "FAIL",
-                   f"Missing concurrency group in: {', '.join(missing_concurrency)} "
+                   f"Missing 'concurrency:' key or 'group: aegis' in: {', '.join(missing_concurrency)} "
                    f"— concurrent AEGIS runs can double-fire partial exits")
     else:
         report.add("AEGIS Concurrency", "PASS",

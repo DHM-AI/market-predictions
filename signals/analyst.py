@@ -41,7 +41,7 @@ _CACHE_HOURS   = 24
 # Map common yfinance "Action" values to a normalized buckets.
 # yfinance returns things like "up", "down", "main", "init", "reit" — we want
 # to know if rating direction is improving or worsening.
-_UP_ACTIONS   = {"up", "init", "main"}     # "main" = maintain (counts as positive bias)
+_UP_ACTIONS   = {"up", "init"}             # "main" = maintained/reiterated rating — NOT a directional upgrade
 _DOWN_ACTIONS = {"down"}
 # Grade strings — used as a secondary check when Action is missing.
 _BULL_GRADES = {"buy", "strong buy", "outperform", "overweight", "positive", "accumulate", "long-term buy"}

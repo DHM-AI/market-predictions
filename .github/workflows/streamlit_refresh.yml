@@ -21,7 +21,7 @@ on:
     - cron: '0 0,2,4,6,8,10,12,14,16,18,20,22 * * *'
     # ── Full redeploy twice per weekday ─────────────────────────────────────
     - cron: '0 11 * * 1-5'   # Mon–Fri 7 AM ET — fresh before market open
-    - cron: '0 2  * * 2-6'   # Mon–Fri 10 PM ET — fresh after ORACLE runs
+    - cron: '0 2 * * 2-6'   # Mon–Fri 10 PM ET — fresh after ORACLE runs
 
 jobs:
   ping:

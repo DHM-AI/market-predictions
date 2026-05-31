@@ -566,7 +566,7 @@ def trail_positions(
 
                 fired_any = False
                 # Tier 1
-                if not _hist["t1"] and pct_gain_decimal >= PARTIAL_EXIT_TIER1_TRIGGER:
+                if not _hist.get("t1", False) and pct_gain_decimal >= PARTIAL_EXIT_TIER1_TRIGGER:
                     try:
                         r = _fire_tier("t1", PARTIAL_EXIT_TIER1_FRACTION,
                                        PARTIAL_EXIT_TIER1_TRIGGER,
@@ -578,7 +578,7 @@ def trail_positions(
                         print(f"[AEGIS] Tier 1 exit failed for {ticker}: {e}")
 
                 # Tier 2 — only check if T1 already fired AND gain ≥ 12%
-                if (_hist["t1"] and not _hist["t2"]
+                if (_hist.get("t1", False) and not _hist.get("t2", False)
                         and pct_gain_decimal >= PARTIAL_EXIT_TIER2_TRIGGER):
                     try:
                         r = _fire_tier("t2", PARTIAL_EXIT_TIER2_FRACTION,
@@ -693,7 +693,8 @@ def trail_positions(
                 # If the first attempt fails with "insufficient qty / held_for_orders" (race
                 # condition where Alpaca hasn't released the shares yet), wait another 2s and retry.
                 trail_pct_val = target_trail * 100   # Alpaca wants e.g. 3.0 for 3%
-                assert 0.5 <= trail_pct_val <= 20, f"trail_percent {trail_pct_val} out of sane range"
+                if not (0.5 <= trail_pct_val <= 20):
+                    raise ValueError(f"trail_percent {trail_pct_val!r} out of sane range [0.5, 20]")
                 order = None
                 _trail_attempts = 0
                 while _trail_attempts < 2 and order is None:
@@ -715,15 +716,16 @@ def trail_positions(
                                 continue
                             # On held_for_orders / insufficient qty, wait and retry once
                             _err_str = str(oe).lower()
-                            if _trail_attempts == 1 and (
-                                "insufficient" in _err_str or "held_for_orders" in _err_str
-                                or "40310000" in str(oe)
-                            ):
-                                import time as _time_mod2
-                                print(f"[AEGIS] {ticker} trailing stop hit held_for_orders — waiting 2s then retry")
-                                _time_mod2.sleep(2.0)
-                                break   # break inner tif loop, outer while retries
-                            raise  # re-raise unexpected errors
+                            if "insufficient" in _err_str or "held_for_orders" in _err_str or "40310000" in str(oe):
+                                if _trail_attempts == 1:
+                                    # first attempt — sleep and let outer while retry
+                                    import time as _time_mod2
+                                    print(f"[AEGIS] {ticker} trailing stop hit held_for_orders — waiting 2s (attempt {_trail_attempts})")
+                                    _time_mod2.sleep(2.0)
+                                else:
+                                    print(f"[AEGIS] {ticker} trailing stop held_for_orders on attempt {_trail_attempts} — giving up, will alert")
+                                break  # always break on held_for_orders, NEVER raise — lets "if order is None" fire
+                            raise  # only re-raise for non-held_for_orders errors
 
                 if order is None:
                     print(f"[AEGIS] {ticker}: could not place trailing stop — skipping")
@@ -731,7 +733,7 @@ def trail_positions(
 
                 # If we cancelled a bracket parent, the TP child was also cancelled.
                 # Reissue the TP as a standalone limit order at the captured price.
-                if _tp_price_to_reissue:
+                if _cancelled_parent and _tp_price_to_reissue:
                     try:
                         from alpaca.trading.requests import LimitOrderRequest as _LOR
                         _tp_side = OrderSide.SELL if is_long else OrderSide.BUY

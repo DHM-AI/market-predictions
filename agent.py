@@ -291,7 +291,7 @@ def _execute_trades(picks_df: pd.DataFrame, explanations: dict,
             pass
 
         if dollar <= 0:
-            _record_block(ticker, _cd_msg if '_cd_msg' in dir() else "Dollar amount reduced to $0")
+            _record_block(ticker, _cd_msg or "Dollar amount reduced to $0")
             continue
 
         # ── Route: crypto vs equity ───────────────────────────────────────
